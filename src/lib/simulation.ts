@@ -1,12 +1,20 @@
 import { ComponentNode, SimulationStep } from "./schema";
-import { buildSimulationPrompt } from "./simulation-prompts";
+import {
+  buildSimulationPrompt,
+  type TraceStepContext,
+} from "./simulation-prompts";
 import { chat } from "./llm";
 
 export async function simulateNode(
   node: ComponentNode,
-  inputPayload: unknown
+  inputPayload: unknown,
+  traceContext?: TraceStepContext,
 ): Promise<SimulationStep> {
-  const { system, user } = buildSimulationPrompt(node, inputPayload);
+  const { system, user } = buildSimulationPrompt(
+    node,
+    inputPayload,
+    traceContext,
+  );
 
   const jsonStr = await chat({ system, user, maxTokens: 4096 });
   const result = JSON.parse(jsonStr);
