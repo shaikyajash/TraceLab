@@ -1,6 +1,7 @@
 "use client";
 
-import type { ComponentNode, PayloadEdge } from "@/lib/schema";
+import type { ComponentNode, PayloadEdge } from "@/types";
+import { NODE_W, NODE_H, KIND_COLORS, KIND_LABELS, CANVAS_WIDTH, CANVAS_HEIGHT, MIN_SCALE, MAX_SCALE, SCALE_STEP } from "@/constants";
 
 interface GraphCanvasProps {
   coreNodes: ComponentNode[];
@@ -22,36 +23,6 @@ interface GraphCanvasProps {
   fitView: () => void;
   setScale: React.Dispatch<React.SetStateAction<number>>;
 }
-
-const NODE_W = 190;
-const NODE_H = 80;
-
-const KIND_COLORS: Record<string, { bg: string; border: string; badgeBg: string; badgeText: string }> = {
-  route_handler: { bg: "#0e1e30", border: "#185FA5", badgeBg: "#B5D4F4", badgeText: "#0C447C" },
-  middleware: { bg: "#1a0e2e", border: "#534AB7", badgeBg: "#CECBF6", badgeText: "#3C3489" },
-  business_logic: { bg: "#0e1e0e", border: "#3B6D11", badgeBg: "#C0DD97", badgeText: "#27500A" },
-  transformer: { bg: "#1e1200", border: "#854F0B", badgeBg: "#FAC775", badgeText: "#633806" },
-  validator: { bg: "#1e0e00", border: "#993C1D", badgeBg: "#F5C4B3", badgeText: "#712B13" },
-  db_call: { bg: "#001e18", border: "#0F6E56", badgeBg: "#9FE1CB", badgeText: "#085041" },
-};
-
-const KIND_LABELS: Record<string, string> = {
-  route_handler: "ROUTE",
-  middleware: "MIDDLEWARE",
-  business_logic: "HANDLER",
-  transformer: "TRANSFORM",
-  validator: "VALIDATOR",
-  db_call: "DB",
-};
-
-const LEGEND_ITEMS = [
-  { kind: "route_handler", label: "route" },
-  { kind: "middleware", label: "middleware" },
-  { kind: "business_logic", label: "business" },
-  { kind: "transformer", label: "transformer" },
-  { kind: "validator", label: "validator" },
-  { kind: "db_call", label: "db_call" },
-];
 
 function edgePath(x1: number, y1: number, x2: number, y2: number): string {
   const cy1 = y1 + Math.abs(y2 - y1) * 0.4;
@@ -121,8 +92,8 @@ export default function GraphCanvas(props: GraphCanvasProps) {
             position: "absolute",
             top: 0,
             left: 0,
-            width: 4000,
-            height: 4000,
+            width: CANVAS_WIDTH,
+            height: CANVAS_HEIGHT,
             overflow: "visible",
             pointerEvents: "none",
           }}
@@ -172,83 +143,98 @@ export default function GraphCanvas(props: GraphCanvasProps) {
           const isSelected = selectedId === node.id;
           const isTraceActive = activeTraceIds.has(node.id);
           const isHead = traceHeadId === node.id;
+          const isGreyedOut = activeTraceIds.size > 0 && !isTraceActive;
 
           return (
             <div
               key={node.id}
               data-node
-              onClick={(e) => { e.stopPropagation(); setSelectedId(node.id); }}
+              onClick={(e) => { 
+                e.stopPropagation(); 
+                if (!isGreyedOut) {
+                  setSelectedId(node.id);
+                }
+              }}
+              className="absolute transition-all duration-200 overflow-hidden"
               style={{
-                position: "absolute",
                 left: pos.x,
                 top: pos.y,
                 width: NODE_W,
                 minHeight: NODE_H,
-                background: colors.bg,
-                border: `0.5px solid ${colors.border}`,
-                borderRadius: 8,
-                padding: "10px 12px",
-                cursor: "pointer",
-                boxShadow: isHead
-                  ? `0 0 20px ${colors.border}88, 0 0 0 2px ${colors.border}`
-                  : isSelected
-                    ? "0 0 0 2px #378ADD"
+                background: "#111114",
+                border: isHead 
+                  ? `2px solid ${colors.border}` 
+                  : isSelected 
+                    ? "2px solid #378ADD" 
                     : isTraceActive
-                      ? `0 0 12px ${colors.border}44`
-                      : "none",
-                transition: "box-shadow 0.2s",
+                      ? `2px solid ${colors.border}66`
+                      : "1px solid #2a2a2e",
+                borderRadius: 10,
+                opacity: isGreyedOut ? 0.25 : 1,
+                cursor: isGreyedOut ? "not-allowed" : "pointer",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                <div style={{ fontSize: 8, background: colors.badgeBg, color: colors.badgeText, padding: "2px 5px", borderRadius: 3, fontWeight: 700, letterSpacing: 0.5 }}>
-                  {label}
+              {/* Top colored strip */}
+              <div 
+                className="h-1 w-full"
+                style={{ background: colors.border }}
+              />
+
+              {/* Content */}
+              <div className="p-3">
+                {/* Badges row */}
+                <div className="flex items-center gap-1.5 mb-2.5">
+                  <div 
+                    className="text-[8px] px-2 py-1 rounded-md font-bold tracking-wider"
+                    style={{ background: colors.badgeBg, color: colors.badgeText }}
+                  >
+                    {label}
+                  </div>
+                  {node.mutates_state && (
+                    <div className="text-[7px] bg-[#2d1a0a] text-[#EF9F27] px-1.5 py-0.5 rounded-md font-bold border border-[#633806]">
+                      MUT
+                    </div>
+                  )}
+                  {isHead && (
+                    <div className="ml-auto w-2 h-2 rounded-full bg-[#378ADD] animate-pulse" />
+                  )}
+                  {isSelected && !isHead && (
+                    <div className="ml-auto w-1.5 h-1.5 rounded-full bg-[#378ADD]" />
+                  )}
                 </div>
-                {node.mutates_state && (
-                  <div style={{ fontSize: 8, background: "#2d1a0a", color: "#EF9F27", padding: "2px 5px", borderRadius: 3, fontWeight: 700, border: "0.5px solid #633806" }}>
-                    MUTATES
+
+                {/* Node name */}
+                <div className="text-[12px] text-[#eee] font-semibold mb-2 leading-tight">
+                  {node.name}
+                </div>
+
+                {/* Description */}
+                {node.description && (
+                  <div className="text-[9px] text-[#777] leading-relaxed">
+                    {node.description.length > 85 ? node.description.slice(0, 85) + "..." : node.description}
                   </div>
                 )}
               </div>
-              <div style={{ fontSize: 11, color: "#ddd", fontWeight: 500, marginBottom: 4, lineHeight: 1.3 }}>
-                {node.name}
-              </div>
-              {node.description && (
-                <div style={{ fontSize: 9, color: "#666", lineHeight: 1.3 }}>
-                  {node.description.length > 80 ? node.description.slice(0, 80) + "..." : node.description}
-                </div>
-              )}
-              {isHead && (
-                <div style={{ position: "absolute", top: -4, right: -4, width: 10, height: 10, borderRadius: "50%", background: "#378ADD", boxShadow: "0 0 8px #378ADD", animation: "pulse 0.6s ease-in-out infinite" }} />
-              )}
             </div>
           );
         })}
       </div>
 
       {/* Toolbar */}
-      <div style={{ position: "absolute", top: 12, left: 12, display: "flex", gap: 4, zIndex: 10 }}>
+      <div className="absolute top-3 left-3 flex gap-2 z-10">
         {[
           { label: "fit view", action: fitView },
-          { label: "+ zoom", action: () => setScale((s) => Math.min(2, s + 0.15)) },
-          { label: "– zoom", action: () => setScale((s) => Math.max(0.3, s - 0.15)) },
+          { label: "+ zoom", action: () => setScale((s) => Math.min(MAX_SCALE, s + SCALE_STEP)) },
+          { label: "– zoom", action: () => setScale((s) => Math.max(MIN_SCALE, s - SCALE_STEP)) },
         ].map((btn, i) => (
-          <button key={i} onClick={btn.action}
-            style={{ background: "#111114", border: "0.5px solid #222", borderRadius: 5, padding: "6px 10px", color: "#888", fontFamily: "inherit", fontSize: 10, cursor: "pointer", fontWeight: 500 }}
-          >{btn.label}</button>
+          <button 
+            key={i} 
+            onClick={btn.action}
+            className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-medium hover:border-[#378ADD] hover:text-[#aaa] transition-colors"
+          >
+            {btn.label}
+          </button>
         ))}
-      </div>
-
-      {/* Legend */}
-      <div style={{ position: "absolute", bottom: 16, left: 16, background: "#111113", border: "0.5px solid #222", borderRadius: 8, padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: "8px 16px", zIndex: 10 }}>
-        {LEGEND_ITEMS.map((item) => {
-          const c = KIND_COLORS[item.kind];
-          return (
-            <div key={item.kind} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#777" }}>
-              <div style={{ width: 10, height: 10, borderRadius: 2, border: `1.5px solid ${c.border}`, background: c.bg }} />
-              {item.label}
-            </div>
-          );
-        })}
       </div>
     </div>
   );

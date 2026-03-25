@@ -1,24 +1,26 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import type { ComponentsGraph, ComponentNode, PayloadEdge, ScanProgress } from "@/lib/schema";
+import type { ComponentsGraph, ComponentNode, PayloadEdge, ScanProgress, TraceStep } from "@/types";
+import { 
+  CORE_KINDS, 
+  NODE_W, 
+  NODE_H, 
+  H_GAP, 
+  V_GAP,
+  DEFAULT_SCALE,
+  DEFAULT_TX,
+  DEFAULT_TY,
+  DEFAULT_SIDEBAR_WIDTH,
+  MIN_SIDEBAR_WIDTH,
+  MAX_SIDEBAR_WIDTH,
+  TRACE_STEP_DELAY,
+  TRACE_HEAD_CLEAR_DELAY,
+  STORAGE_KEYS,
+} from "@/constants";
 import LandingPage from "@/components/LandingPage";
 import Sidebar from "@/components/Sidebar";
 import GraphCanvas from "@/components/GraphCanvas";
-
-const CORE_KINDS = new Set([
-  "route_handler",
-  "middleware",
-  "business_logic",
-  "transformer",
-  "validator",
-  "db_call",
-]);
-
-const NODE_W = 190;
-const NODE_H = 80;
-const H_GAP = 20;
-const V_GAP = 110;
 
 function layoutNodes(
   nodes: ComponentNode[],
@@ -121,6 +123,14 @@ interface TraceStep {
   edgeLabel: string;
 }
 
+interface TraceStep {
+  nodeId: string;
+  name: string;
+  kind: string;
+  description: string;
+  edgeLabel: string;
+}
+
 function smartTrace(
   startId: string,
   edges: PayloadEdge[],
@@ -201,8 +211,8 @@ export default function Home() {
   /* restore session from localStorage on mount */
   useEffect(() => {
     try {
-      const savedGraph = localStorage.getItem("tracelab_graph");
-      const savedUrl = localStorage.getItem("tracelab_github_url");
+      const savedGraph = localStorage.getItem(STORAGE_KEYS.GRAPH);
+      const savedUrl = localStorage.getItem(STORAGE_KEYS.GITHUB_URL);
       if (savedGraph) setGraph(JSON.parse(savedGraph));
       if (savedUrl) setGithubUrl(savedUrl);
     } catch (err) {
@@ -211,9 +221,9 @@ export default function Home() {
   }, []);
 
   /* canvas state */
-  const [tx, setTx] = useState(20);
-  const [ty, setTy] = useState(20);
-  const [scale, setScale] = useState(0.72);
+  const [tx, setTx] = useState(DEFAULT_TX);
+  const [ty, setTy] = useState(DEFAULT_TY);
+  const [scale, setScale] = useState(DEFAULT_SCALE);
   const [isPanning, setIsPanning] = useState(false);
   const panStart = useRef({ x: 0, y: 0, tx: 0, ty: 0 });
 
@@ -221,9 +231,9 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   /* sidebar resize */
-  const [sidebarWidth, setSidebarWidth] = useState(300);
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
-  const resizeStart = useRef({ x: 0, w: 300 });
+  const resizeStart = useRef({ x: 0, w: DEFAULT_SIDEBAR_WIDTH });
 
   /* simulation tracing */
   const [traceMethod, setTraceMethod] = useState("GET");
@@ -238,6 +248,21 @@ export default function Home() {
   const [pathParams, setPathParams] = useState<Record<string, string>>({});
   const [reqBody, setReqBody] = useState("{\n  \n}");
   const [activeReqTab, setActiveReqTab] = useState<"params" | "body">("params");
+
+  /* sidebar main tab */
+  const [mainTab, setMainTab] = useState<"request" | "trace">("request");
+
+  /* graph transition */
+  const [isGraphLoaded, setIsGraphLoaded] = useState(false);
+
+  /* trigger transition when graph changes */
+  useEffect(() => {
+    if (graph) {
+      setIsGraphLoaded(false);
+      const timer = setTimeout(() => setIsGraphLoaded(true), 50);
+      return () => clearTimeout(timer);
+    }
+  }, [graph]);
 
   /* filtered core nodes + edges */
   const coreNodes = useMemo(() => {
@@ -326,7 +351,7 @@ export default function Home() {
     if (!isResizing) return;
     const onMove = (e: MouseEvent) => {
       const delta = e.clientX - resizeStart.current.x;
-      setSidebarWidth(Math.max(200, Math.min(600, resizeStart.current.w + delta)));
+      setSidebarWidth(Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, resizeStart.current.w + delta)));
     };
     const onUp = () => setIsResizing(false);
     window.addEventListener("mousemove", onMove);
@@ -399,8 +424,8 @@ export default function Home() {
         if (loadRes.ok) {
           const data: ComponentsGraph = await loadRes.json();
           setGraph(data);
-          localStorage.setItem("tracelab_graph", JSON.stringify(data));
-          localStorage.setItem("tracelab_github_url", url);
+          localStorage.setItem(STORAGE_KEYS.GRAPH, JSON.stringify(data));
+          localStorage.setItem(STORAGE_KEYS.GITHUB_URL, url);
         } else {
           throw new Error("Scan completed but failed to load graph");
         }
@@ -423,7 +448,7 @@ export default function Home() {
       try {
         const data = JSON.parse(reader.result as string);
         setGraph(data);
-        localStorage.setItem("tracelab_graph", JSON.stringify(data));
+        localStorage.setItem(STORAGE_KEYS.GRAPH, JSON.stringify(data));
         setError(null);
       } catch {
         setError("Invalid JSON file");
@@ -458,9 +483,9 @@ export default function Home() {
   }, []);
 
   const fitView = useCallback(() => {
-    setScale(0.72);
-    setTx(20);
-    setTy(20);
+    setScale(DEFAULT_SCALE);
+    setTx(DEFAULT_TX);
+    setTy(DEFAULT_TY);
   }, []);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
@@ -532,14 +557,14 @@ export default function Home() {
     setTraceSteps(steps);
 
     for (let i = 0; i < steps.length; i++) {
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, TRACE_STEP_DELAY));
       setTraceHeadId(steps[i].nodeId);
       setActiveTraceIds((prev) => new Set([...prev, steps[i].nodeId]));
       setTraceVisible(i + 1);
     }
 
     setIsTracing(false);
-    setTimeout(() => setTraceHeadId(null), 800);
+    setTimeout(() => setTraceHeadId(null), TRACE_HEAD_CLEAR_DELAY);
   }, [traceRouteId, graph, coreEdges, coreNodeIds, nodeMap, reqBody]);
 
   const clearTrace = useCallback(() => {
@@ -578,7 +603,20 @@ export default function Home() {
           0%, 100% { transform: scale(1); opacity: 1; }
           50% { transform: scale(1.8); opacity: 0.4; }
         }
+        @keyframes fadeInBlur {
+          0% { opacity: 0; filter: blur(8px); transform: scale(0.98); }
+          100% { opacity: 1; filter: blur(0px); transform: scale(1); }
+        }
       `}</style>
+
+      <div 
+        className="flex w-full h-full"
+        style={{
+          animation: isGraphLoaded ? "fadeInBlur 0.6s ease-out" : "none",
+          opacity: isGraphLoaded ? 1 : 0,
+          filter: isGraphLoaded ? "blur(0px)" : "blur(8px)",
+        }}
+      >
 
       <Sidebar
         width={sidebarWidth}
@@ -605,12 +643,14 @@ export default function Home() {
         nodeById={nodeById}
         setGraph={setGraph}
         setError={setError}
+        mainTab={mainTab}
+        setMainTab={setMainTab}
       />
 
       {/* Resize handle */}
       <div
         onMouseDown={handleResizeStart}
-        className="w-1 cursor-col-resize transition-colors duration-150 z-20 flex-shrink-0"
+        className="w-1 cursor-col-resize transition-colors duration-150 z-20 shrink-0"
         style={{ background: isResizing ? "#378ADD" : "transparent" }}
         onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "#333"; }}
         onMouseLeave={(e) => { if (!isResizing) (e.target as HTMLElement).style.background = "transparent"; }}
@@ -627,7 +667,10 @@ export default function Home() {
         selectedId={selectedId}
         activeTraceIds={activeTraceIds}
         traceHeadId={traceHeadId}
-        setSelectedId={setSelectedId}
+        setSelectedId={(id) => {
+          setSelectedId(id);
+          if (id) setMainTab("request");
+        }}
         handleCanvasMouseDown={handleCanvasMouseDown}
         handleCanvasMouseMove={handleCanvasMouseMove}
         handleCanvasMouseUp={handleCanvasMouseUp}
@@ -636,6 +679,7 @@ export default function Home() {
         fitView={fitView}
         setScale={setScale}
       />
+      </div>
     </div>
   );
 }
