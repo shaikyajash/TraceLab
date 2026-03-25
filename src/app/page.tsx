@@ -2,58 +2,9 @@
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import type { ComponentsGraph, ComponentNode, PayloadEdge, ScanProgress } from "@/lib/schema";
-
-/* ── colour palette per node kind ── */
-const KIND_COLORS: Record<
-  string,
-  { bg: string; border: string; badgeBg: string; badgeText: string }
-> = {
-  route_handler: {
-    bg: "#0e1e30",
-    border: "#185FA5",
-    badgeBg: "#B5D4F4",
-    badgeText: "#0C447C",
-  },
-  middleware: {
-    bg: "#1a0e2e",
-    border: "#534AB7",
-    badgeBg: "#CECBF6",
-    badgeText: "#3C3489",
-  },
-  business_logic: {
-    bg: "#0e1e0e",
-    border: "#3B6D11",
-    badgeBg: "#C0DD97",
-    badgeText: "#27500A",
-  },
-  transformer: {
-    bg: "#1e1200",
-    border: "#854F0B",
-    badgeBg: "#FAC775",
-    badgeText: "#633806",
-  },
-  validator: {
-    bg: "#1e0e00",
-    border: "#993C1D",
-    badgeBg: "#F5C4B3",
-    badgeText: "#712B13",
-  },
-  db_call: {
-    bg: "#001e18",
-    border: "#0F6E56",
-    badgeBg: "#9FE1CB",
-    badgeText: "#085041",
-  },
-};
-
-const KIND_LABELS: Record<string, string> = {
-  route_handler: "ROUTE",
-  middleware: "MIDDLEWARE",
-  business_logic: "HANDLER",
-  transformer: "TRANSFORM",
-  validator: "VALIDATOR",
-  db_call: "DB",
-};
+import LandingPage from "@/components/LandingPage";
+import Sidebar from "@/components/Sidebar";
+import GraphCanvas from "@/components/GraphCanvas";
 
 const CORE_KINDS = new Set([
   "route_handler",
@@ -64,26 +15,11 @@ const CORE_KINDS = new Set([
   "db_call",
 ]);
 
-const LEGEND_ITEMS = [
-  { kind: "route_handler", label: "route" },
-  { kind: "middleware", label: "middleware" },
-  { kind: "business_logic", label: "business" },
-  { kind: "transformer", label: "transformer" },
-  { kind: "validator", label: "validator" },
-  { kind: "db_call", label: "db_call" },
-];
-
 const NODE_W = 190;
 const NODE_H = 80;
 const H_GAP = 20;
 const V_GAP = 110;
 
-/**
- * Layout using topological depth from edges (BFS from roots).
- * Nodes with no incoming edges are roots (layer 0).
- * Each other node's layer = max(parent layers) + 1.
- * Within each layer, sort by average x of parents.
- */
 function layoutNodes(
   nodes: ComponentNode[],
   edges: PayloadEdge[]
@@ -101,7 +37,6 @@ function layoutNodes(
     incoming.get(e.to)!.push(e.from);
   }
 
-  /* compute depth per node via BFS from roots */
   const depth = new Map<string, number>();
   const roots = nodes.filter((n) => !(incoming.get(n.id)?.length));
   const queue: string[] = [];
@@ -110,7 +45,6 @@ function layoutNodes(
     depth.set(r.id, 0);
     queue.push(r.id);
   }
-  /* nodes with no edges at all */
   for (const n of nodes) {
     if (!depth.has(n.id)) {
       depth.set(n.id, 0);
@@ -118,7 +52,6 @@ function layoutNodes(
     }
   }
 
-  /* BFS — set depth = max(parent depth) + 1 */
   let head = 0;
   while (head < queue.length) {
     const id = queue[head++];
@@ -132,7 +65,6 @@ function layoutNodes(
     }
   }
 
-  /* group into layers */
   const maxDepth = Math.max(...Array.from(depth.values()), 0);
   const layers: ComponentNode[][] = Array.from({ length: maxDepth + 1 }, () => []);
   for (const n of nodes) {
@@ -140,7 +72,6 @@ function layoutNodes(
     layers[d].push(n);
   }
 
-  /* find widest layer for centering */
   let maxLayerWidth = 0;
   for (const layer of layers) {
     if (layer.length === 0) continue;
@@ -154,7 +85,6 @@ function layoutNodes(
     const layer = layers[li];
     if (layer.length === 0) continue;
 
-    /* sort by average x of parents */
     if (li > 0) {
       layer.sort((a, b) => {
         const avgX = (id: string) => {
@@ -183,26 +113,14 @@ function layoutNodes(
   return positions;
 }
 
-/* ── cubic bezier path ── */
-function edgePath(x1: number, y1: number, x2: number, y2: number): string {
-  const cy1 = y1 + Math.abs(y2 - y1) * 0.4;
-  const cy2 = y2 - Math.abs(y2 - y1) * 0.4;
-  return `M${x1},${y1} C${x1},${cy1} ${x2},${cy2} ${x2},${y2}`;
-}
-
-/* ── trace step type ── */
 interface TraceStep {
   nodeId: string;
   name: string;
   kind: string;
   description: string;
-  edgeLabel: string; /* label on the edge that led here */
+  edgeLabel: string;
 }
 
-/**
- * Payload-aware BFS: match payload fields against edge labels to pick the right branch.
- * e.g. if payload has action:"Generate", prefer edges containing "Generate" over "Retrieve".
- */
 function smartTrace(
   startId: string,
   edges: PayloadEdge[],
@@ -217,7 +135,6 @@ function smartTrace(
     out.get(e.from)!.push({ to: e.to, payload: e.payload });
   }
 
-  /* extract hint strings from payload values for matching */
   const hints: string[] = [];
   for (const v of Object.values(payload)) {
     if (typeof v === "string") hints.push(v.toLowerCase());
@@ -242,7 +159,6 @@ function smartTrace(
     const children = out.get(id) || [];
     if (children.length === 0) continue;
 
-    /* if we have hints, score edges by how well they match the payload */
     if (hints.length > 0 && children.length > 1) {
       const scored = children.map((c) => {
         const label = c.payload.toLowerCase();
@@ -252,7 +168,6 @@ function smartTrace(
         }
         return { ...c, score };
       });
-      /* if any edges match, only follow those; otherwise follow all */
       const maxScore = Math.max(...scored.map((s) => s.score));
       const filtered = maxScore > 0 ? scored.filter((s) => s.score === maxScore) : scored;
       for (const c of filtered) {
@@ -274,7 +189,6 @@ function smartTrace(
   return steps;
 }
 
-/* ── main page ── */
 export default function Home() {
   const [graph, setGraph] = useState<ComponentsGraph | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -283,6 +197,18 @@ export default function Home() {
   const [scanMessage, setScanMessage] = useState("");
   const [scanPhase, setScanPhase] = useState<string>("");
   const [forceRescan, setForceRescan] = useState(false);
+
+  /* restore session from localStorage on mount */
+  useEffect(() => {
+    try {
+      const savedGraph = localStorage.getItem("tracelab_graph");
+      const savedUrl = localStorage.getItem("tracelab_github_url");
+      if (savedGraph) setGraph(JSON.parse(savedGraph));
+      if (savedUrl) setGithubUrl(savedUrl);
+    } catch (err) {
+      console.error("Failed to restore session:", err);
+    }
+  }, []);
 
   /* canvas state */
   const [tx, setTx] = useState(20);
@@ -349,11 +275,9 @@ export default function Home() {
     const node = coreNodes.find((n) => n.id === traceRouteId);
     if (!node) return;
 
-    /* auto-detect method from node data */
     if (node.method) {
       setTraceMethod(node.method.toUpperCase());
     } else {
-      /* try to infer from the node id or name */
       const idUpper = node.id.toUpperCase();
       if (idUpper.startsWith("GET ")) setTraceMethod("GET");
       else if (idUpper.startsWith("POST ")) setTraceMethod("POST");
@@ -362,15 +286,12 @@ export default function Home() {
       else if (idUpper.startsWith("PATCH ")) setTraceMethod("PATCH");
     }
 
-    /* auto-fill body from example_payload */
     if (node.example_payload) {
       try {
-        /* pretty-print if valid JSON */
         setReqBody(JSON.stringify(JSON.parse(node.example_payload), null, 2));
       } catch {
         setReqBody(node.example_payload);
       }
-      /* switch to body tab if it's a method that supports a body */
       const m = (node.method || "GET").toUpperCase();
       if (m !== "GET" && m !== "HEAD") {
         setActiveReqTab("body");
@@ -379,7 +300,6 @@ export default function Home() {
       setReqBody("{\n  \n}");
     }
 
-    /* reset path params */
     const init: Record<string, string> = {};
     for (const p of routePathParams) init[p] = "";
     setPathParams(init);
@@ -395,7 +315,7 @@ export default function Home() {
     setPositions(layoutNodes(coreNodes, coreEdges));
   }, [graph, coreNodes, coreEdges]);
 
-  /* ── sidebar resize handlers ── */
+  /* sidebar resize handlers */
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     setIsResizing(true);
@@ -405,7 +325,7 @@ export default function Home() {
   useEffect(() => {
     if (!isResizing) return;
     const onMove = (e: MouseEvent) => {
-      const delta = resizeStart.current.x - e.clientX;
+      const delta = e.clientX - resizeStart.current.x;
       setSidebarWidth(Math.max(200, Math.min(600, resizeStart.current.w + delta)));
     };
     const onUp = () => setIsResizing(false);
@@ -417,7 +337,7 @@ export default function Home() {
     };
   }, [isResizing]);
 
-  /* ── scan from GitHub URL ── */
+  /* scan from GitHub URL */
   const handleScan = useCallback(async () => {
     const url = githubUrl.trim();
     if (!url) return;
@@ -470,7 +390,6 @@ export default function Home() {
         }
       }
 
-      /* load the graph from the output file */
       if (outputPath) {
         const loadRes = await fetch("/api/load-graph", {
           method: "POST",
@@ -480,6 +399,8 @@ export default function Home() {
         if (loadRes.ok) {
           const data: ComponentsGraph = await loadRes.json();
           setGraph(data);
+          localStorage.setItem("tracelab_graph", JSON.stringify(data));
+          localStorage.setItem("tracelab_github_url", url);
         } else {
           throw new Error("Scan completed but failed to load graph");
         }
@@ -493,7 +414,7 @@ export default function Home() {
     }
   }, [githubUrl, forceRescan]);
 
-  /* ── upload JSON directly ── */
+  /* upload JSON directly */
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -502,6 +423,7 @@ export default function Home() {
       try {
         const data = JSON.parse(reader.result as string);
         setGraph(data);
+        localStorage.setItem("tracelab_graph", JSON.stringify(data));
         setError(null);
       } catch {
         setError("Invalid JSON file");
@@ -510,7 +432,7 @@ export default function Home() {
     reader.readAsText(file);
   };
 
-  /* ── canvas interactions ── */
+  /* canvas interactions */
   const handleCanvasMouseDown = useCallback(
     (e: React.MouseEvent) => {
       if ((e.target as HTMLElement).closest("[data-node]")) return;
@@ -532,8 +454,7 @@ export default function Home() {
   const handleCanvasMouseUp = useCallback(() => setIsPanning(false), []);
 
   const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    setScale((s) => Math.min(2, Math.max(0.3, s + (e.deltaY > 0 ? -0.08 : 0.08))));
+    // Disabled zoom on scroll
   }, []);
 
   const fitView = useCallback(() => {
@@ -546,20 +467,19 @@ export default function Home() {
     if (!(e.target as HTMLElement).closest("[data-node]")) setSelectedId(null);
   }, []);
 
-  /* ── node lookup ── */
+  /* node lookup */
   const nodeById = useCallback(
     (id: string) => coreNodes.find((n) => n.id === id),
     [coreNodes]
   );
 
-  /* node map for quick lookup */
   const nodeMap = useMemo(() => {
     const m = new Map<string, ComponentNode>();
     for (const n of coreNodes) m.set(n.id, n);
     return m;
   }, [coreNodes]);
 
-  /* ── simulation: prefer precomputed traces, fallback to smart BFS ── */
+  /* simulation */
   const runSimulation = useCallback(async () => {
     if (!traceRouteId || !graph) return;
     setIsTracing(true);
@@ -575,10 +495,8 @@ export default function Home() {
 
     let steps: TraceStep[];
 
-    /* try precomputed traces first */
     const precomputed = graph.traces?.filter((t) => t.route_id === traceRouteId) || [];
     if (precomputed.length > 0) {
-      /* find the best matching trace by scoring payload against example_payload */
       let bestTrace = precomputed[0];
       let bestScore = -1;
       for (const trace of precomputed) {
@@ -597,7 +515,6 @@ export default function Home() {
         }
       }
 
-      /* convert precomputed trace steps to our TraceStep format */
       steps = bestTrace.steps.map((s) => {
         const node = nodeMap.get(s.node_id);
         return {
@@ -609,13 +526,11 @@ export default function Home() {
         };
       });
     } else {
-      /* fallback: smart BFS */
       steps = smartTrace(traceRouteId, coreEdges, coreNodeIds, nodeMap, payload);
     }
 
     setTraceSteps(steps);
 
-    /* animate through steps */
     for (let i = 0; i < steps.length; i++) {
       await new Promise((r) => setTimeout(r, 300));
       setTraceHeadId(steps[i].nodeId);
@@ -634,182 +549,29 @@ export default function Home() {
     setTraceVisible(0);
   }, []);
 
-  /* ── landing screen ── */
+  /* landing screen */
   if (!graph) {
-    const PHASE_LABELS: Record<string, string> = {
-      discovering: "Discovering",
-      reading: "Reading",
-      analyzing: "Analyzing",
-      cross_service: "Cross-service",
-      merging: "Writing",
-    };
-
     return (
-      <div style={{
-        background: "#0d0d0f",
-        color: "#ddd",
-        fontFamily: "'SF Mono', 'Cascadia Code', 'Fira Code', monospace",
-        height: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}>
-        <div style={{ width: 440, display: "flex", flexDirection: "column", gap: 24 }}>
-          {/* Logo */}
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 24, fontWeight: 700, letterSpacing: 3 }}>
-              TRACE<span style={{ color: "#378ADD" }}>LAB</span>
-            </div>
-            <div style={{ fontSize: 11, color: "#555", marginTop: 6 }}>
-              Paste a Git repo URL to scan and visualize
-            </div>
-          </div>
-
-          {/* GitHub URL input */}
-          <form onSubmit={(e) => { e.preventDefault(); handleScan(); }} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <input
-              type="text"
-              value={githubUrl}
-              onChange={(e) => setGithubUrl(e.target.value)}
-              placeholder="https://gitea.example.com/org/repo"
-              disabled={isScanning}
-              style={{
-                background: "#111114",
-                border: "0.5px solid #2a2a2e",
-                borderRadius: 8,
-                padding: "12px 14px",
-                color: "#ddd",
-                fontFamily: "inherit",
-                fontSize: 12,
-                outline: "none",
-                opacity: isScanning ? 0.5 : 1,
-              }}
-            />
-
-            {/* Force rescan checkbox */}
-            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={forceRescan}
-                onChange={(e) => setForceRescan(e.target.checked)}
-                disabled={isScanning}
-                style={{ accentColor: "#378ADD" }}
-              />
-              <span style={{ fontSize: 10, color: "#555" }}>Force rescan (ignore cached results)</span>
-            </label>
-
-            <button
-              type="submit"
-              disabled={isScanning || !githubUrl.trim()}
-              style={{
-                background: isScanning ? "#111114" : "#185FA5",
-                border: isScanning ? "0.5px solid #2a2a2e" : "none",
-                borderRadius: 8,
-                padding: "11px 0",
-                color: isScanning ? "#666" : "#fff",
-                fontFamily: "inherit",
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: isScanning || !githubUrl.trim() ? "default" : "pointer",
-                opacity: !githubUrl.trim() && !isScanning ? 0.4 : 1,
-                letterSpacing: 0.3,
-              }}
-            >
-              {isScanning ? "Scanning..." : "Scan & Visualize"}
-            </button>
-          </form>
-
-          {/* Scan progress */}
-          {isScanning && scanPhase && (
-            <div style={{ background: "#111114", border: "0.5px solid #1a1a1c", borderRadius: 8, padding: "14px 16px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-                <div style={{
-                  width: 6, height: 6, borderRadius: "50%", background: "#378ADD",
-                  animation: "pulse 1s ease-in-out infinite",
-                }} />
-                <span style={{ fontSize: 10, color: "#378ADD", fontWeight: 600, letterSpacing: 0.5 }}>
-                  {PHASE_LABELS[scanPhase] || scanPhase.toUpperCase()}
-                </span>
-              </div>
-              <div style={{ fontSize: 10, color: "#666", lineHeight: 1.5 }}>
-                {scanMessage}
-              </div>
-            </div>
-          )}
-
-          {/* Divider */}
-          <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#333", fontSize: 9 }}>
-            <div style={{ flex: 1, height: 0.5, background: "#222" }} />
-            <span>or upload existing scan</span>
-            <div style={{ flex: 1, height: 0.5, background: "#222" }} />
-          </div>
-
-          {/* Upload */}
-          <label style={{
-            display: "block",
-            background: "#111114",
-            border: "0.5px dashed #2a2a2e",
-            borderRadius: 8,
-            padding: "14px 0",
-            textAlign: "center",
-            cursor: "pointer",
-            fontSize: 11,
-            color: "#555",
-          }}>
-            Upload .tracelab.json
-            <input type="file" accept=".json" onChange={handleUpload} style={{ display: "none" }} />
-          </label>
-
-          {/* Error */}
-          {error && (
-            <div style={{
-              background: "#1e0e0e",
-              border: "0.5px solid #3a1a1a",
-              borderRadius: 8,
-              padding: "10px 14px",
-              fontSize: 11,
-              color: "#e07070",
-              lineHeight: 1.5,
-            }}>
-              {error}
-            </div>
-          )}
-
-          <style>{`
-            @keyframes pulse {
-              0%, 100% { opacity: 1; }
-              50% { opacity: 0.3; }
-            }
-          `}</style>
-        </div>
-      </div>
+      <LandingPage
+        githubUrl={githubUrl}
+        setGithubUrl={setGithubUrl}
+        forceRescan={forceRescan}
+        setForceRescan={setForceRescan}
+        isScanning={isScanning}
+        scanPhase={scanPhase}
+        scanMessage={scanMessage}
+        error={error}
+        handleScan={handleScan}
+        handleUpload={handleUpload}
+      />
     );
   }
 
-  /* ── graph visualizer ── */
-  const selectedNode = selectedId ? nodeById(selectedId) : null;
-
-  const traceEdgeSet = new Set<string>();
-  if (activeTraceIds.size > 0) {
-    for (const e of coreEdges) {
-      if (activeTraceIds.has(e.from) && activeTraceIds.has(e.to)) {
-        traceEdgeSet.add(`${e.from}->${e.to}`);
-      }
-    }
-  }
+  /* graph visualizer */
+  const selectedNode = selectedId ? (nodeById(selectedId) || null) : null;
 
   return (
-    <div
-      style={{
-        background: "#0d0d0f",
-        fontFamily: "'SF Mono', 'Cascadia Code', 'Fira Code', monospace",
-        height: "100vh",
-        display: "flex",
-        overflow: "hidden",
-        userSelect: isResizing ? "none" : "auto",
-      }}
-    >
-      {/* ── Global styles ── */}
+    <div className="bg-[#0d0d0f] h-screen flex overflow-hidden" style={{ userSelect: isResizing ? "none" : "auto" }}>
       <style>{`
         @keyframes dash { to { stroke-dashoffset: -18; } }
         @keyframes pulse {
@@ -818,383 +580,62 @@ export default function Home() {
         }
       `}</style>
 
-      {/* ── Canvas panel ── */}
-      <div
-        style={{
-          flex: 1,
-          position: "relative",
-          overflow: "hidden",
-          cursor: isPanning ? "grabbing" : "grab",
-        }}
-        onMouseDown={handleCanvasMouseDown}
-        onMouseMove={handleCanvasMouseMove}
-        onMouseUp={handleCanvasMouseUp}
-        onMouseLeave={handleCanvasMouseUp}
-        onWheel={handleWheel}
-        onClick={handleCanvasClick}
-      >
-        <div
-          id="graph-wrap"
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
-            transformOrigin: "0 0",
-          }}
-        >
-          {/* SVG edges */}
-          <svg
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              width: 4000,
-              height: 4000,
-              overflow: "visible",
-              pointerEvents: "none",
-            }}
-          >
-            <defs>
-              <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                <path d="M2 1L8 5L2 9" fill="none" stroke="#2a4a7a" strokeWidth="1.5" strokeLinecap="round" />
-              </marker>
-              <marker id="arr-lit" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                <path d="M2 1L8 5L2 9" fill="none" stroke="#378ADD" strokeWidth="1.5" strokeLinecap="round" />
-              </marker>
-            </defs>
-            {coreEdges.map((edge, i) => {
-              const fromPos = positions.get(edge.from);
-              const toPos = positions.get(edge.to);
-              if (!fromPos || !toPos) return null;
-              const x1 = fromPos.x + NODE_W / 2;
-              const y1 = fromPos.y + NODE_H;
-              const x2 = toPos.x + NODE_W / 2;
-              const y2 = toPos.y;
-              const isLit = traceEdgeSet.has(`${edge.from}->${edge.to}`);
-              return (
-                <path
-                  key={i}
-                  d={edgePath(x1, y1, x2, y2)}
-                  fill="none"
-                  stroke={isLit ? "#378ADD" : "#1a3a5c"}
-                  strokeWidth={isLit ? 2 : 1.5}
-                  strokeDasharray="5 4"
-                  markerEnd={isLit ? "url(#arr-lit)" : "url(#arr)"}
-                  style={{
-                    animation: "dash 1.2s linear infinite",
-                    animationDelay: `${i * 0.15}s`,
-                    transition: "stroke 0.3s, stroke-width 0.3s",
-                  }}
-                />
-              );
-            })}
-          </svg>
+      <Sidebar
+        width={sidebarWidth}
+        routes={routes}
+        traceMethod={traceMethod}
+        traceRouteId={traceRouteId}
+        setTraceRouteId={setTraceRouteId}
+        setTraceMethod={setTraceMethod}
+        clearTrace={clearTrace}
+        setSelectedId={setSelectedId}
+        routePathParams={routePathParams}
+        pathParams={pathParams}
+        setPathParams={setPathParams}
+        reqBody={reqBody}
+        setReqBody={setReqBody}
+        activeReqTab={activeReqTab}
+        setActiveReqTab={setActiveReqTab}
+        runSimulation={runSimulation}
+        isTracing={isTracing}
+        traceSteps={traceSteps}
+        traceVisible={traceVisible}
+        selectedNode={selectedNode}
+        coreEdges={coreEdges}
+        nodeById={nodeById}
+        setGraph={setGraph}
+        setError={setError}
+      />
 
-          {/* Nodes */}
-          {coreNodes.map((node) => {
-            const pos = positions.get(node.id);
-            if (!pos) return null;
-            const colors = KIND_COLORS[node.kind] || KIND_COLORS.business_logic;
-            const label = KIND_LABELS[node.kind] || node.kind.toUpperCase();
-            const isSelected = selectedId === node.id;
-            const isTraceActive = activeTraceIds.has(node.id);
-            const isHead = traceHeadId === node.id;
-
-            return (
-              <div
-                key={node.id}
-                data-node
-                onClick={(e) => { e.stopPropagation(); setSelectedId(node.id); }}
-                style={{
-                  position: "absolute",
-                  left: pos.x,
-                  top: pos.y,
-                  width: NODE_W,
-                  minHeight: NODE_H,
-                  background: colors.bg,
-                  border: `0.5px solid ${colors.border}`,
-                  borderRadius: 8,
-                  padding: "10px 12px",
-                  cursor: "pointer",
-                  boxShadow: isHead
-                    ? `0 0 20px ${colors.border}88, 0 0 0 2px ${colors.border}`
-                    : isSelected
-                      ? "0 0 0 2px #378ADD"
-                      : isTraceActive
-                        ? `0 0 12px ${colors.border}44`
-                        : "none",
-                  opacity: activeTraceIds.size > 0 && !isTraceActive ? 0.3 : 1,
-                  transition: "box-shadow 0.3s, opacity 0.3s",
-                }}
-              >
-                <div style={{ display: "inline-block", background: colors.badgeBg, color: colors.badgeText, fontSize: 9, fontWeight: 700, letterSpacing: 0.8, padding: "2px 6px", borderRadius: 3, marginBottom: 6 }}>
-                  {label}
-                </div>
-                <div style={{ fontSize: 12, color: "#ddd", fontWeight: 500, lineHeight: 1.3 }}>
-                  {node.name}
-                </div>
-                <div style={{ fontSize: 9, color: "#666", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {node.description || node.defined_in || node.service}
-                </div>
-                {isHead && (
-                  <div style={{ position: "absolute", top: -4, right: -4, width: 10, height: 10, borderRadius: "50%", background: "#378ADD", boxShadow: "0 0 8px #378ADD", animation: "pulse 0.6s ease-in-out infinite" }} />
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Toolbar */}
-        <div style={{ position: "absolute", top: 12, left: 12, display: "flex", gap: 4, zIndex: 10 }}>
-          {[
-            { label: "fit view", action: fitView },
-            { label: "+ zoom", action: () => setScale((s) => Math.min(2, s + 0.15)) },
-            { label: "\u2013 zoom", action: () => setScale((s) => Math.max(0.3, s - 0.15)) },
-          ].map((btn) => (
-            <button key={btn.label} onClick={btn.action}
-              style={{ background: "#161618", border: "0.5px solid #2a2a2c", borderRadius: 6, padding: "6px 14px", color: "#888", fontFamily: "inherit", fontSize: 11, cursor: "pointer" }}
-            >{btn.label}</button>
-          ))}
-        </div>
-
-        {/* Legend */}
-        <div style={{ position: "absolute", bottom: 16, left: 16, background: "#111113", border: "0.5px solid #222", borderRadius: 8, padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: "8px 16px", zIndex: 10 }}>
-          {LEGEND_ITEMS.map((item) => {
-            const c = KIND_COLORS[item.kind];
-            return (
-              <div key={item.kind} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "#777" }}>
-                <div style={{ width: 10, height: 10, borderRadius: 2, border: `1.5px solid ${c.border}`, background: c.bg }} />
-                {item.label}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ── Resize handle ── */}
+      {/* Resize handle */}
       <div
         onMouseDown={handleResizeStart}
-        style={{
-          width: 4,
-          cursor: "col-resize",
-          background: isResizing ? "#378ADD" : "transparent",
-          transition: "background 0.15s",
-          zIndex: 20,
-          flexShrink: 0,
-        }}
+        className="w-1 cursor-col-resize transition-colors duration-150 z-20 flex-shrink-0"
+        style={{ background: isResizing ? "#378ADD" : "transparent" }}
         onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "#333"; }}
         onMouseLeave={(e) => { if (!isResizing) (e.target as HTMLElement).style.background = "transparent"; }}
       />
 
-      {/* ── Right sidebar ── */}
-      <div
-        style={{
-          width: sidebarWidth,
-          minWidth: 200,
-          maxWidth: 600,
-          borderLeft: "0.5px solid #1a1a1c",
-          background: "#111114",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          flexShrink: 0,
-        }}
-      >
-        {/* ── Simulate ── */}
-        <div style={{ padding: "14px 14px 12px", borderBottom: "0.5px solid #1a1a1c" }}>
-          <div style={{ fontSize: 10, color: "#555", letterSpacing: 1, marginBottom: 10 }}>SIMULATE</div>
-
-          {/* Method + Route */}
-          <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
-            <div style={{ background: "#0d0d0f", border: "0.5px solid #222", borderRadius: 4, padding: "5px 8px", color: traceMethod === "GET" ? "#3B6D11" : traceMethod === "POST" ? "#854F0B" : traceMethod === "DELETE" ? "#993C1D" : "#534AB7", fontFamily: "inherit", fontSize: 10, fontWeight: 700, width: 42, textAlign: "center", flexShrink: 0 }}>
-              {traceMethod}
-            </div>
-            <select value={traceRouteId || ""} onChange={(e) => { setTraceRouteId(e.target.value || null); clearTrace(); setSelectedId(e.target.value || null); }}
-              style={{ flex: 1, background: "#0d0d0f", border: "0.5px solid #222", borderRadius: 4, padding: "5px 8px", color: "#aaa", fontFamily: "inherit", fontSize: 10, outline: "none", cursor: "pointer" }}
-            >
-              <option value="">select route...</option>
-              {routes.map((r) => <option key={r.id} value={r.id}>{r.path_pattern || r.name}</option>)}
-            </select>
-          </div>
-
-          {/* Tabs: Params / Body */}
-          <div style={{ display: "flex", gap: 0, marginBottom: 8, borderBottom: "0.5px solid #222" }}>
-            {(["params", "body"] as const).map((tab) => (
-              <button key={tab} onClick={() => setActiveReqTab(tab)}
-                style={{ flex: 1, background: "transparent", border: "none", borderBottom: activeReqTab === tab ? "2px solid #378ADD" : "2px solid transparent", padding: "6px 0", color: activeReqTab === tab ? "#bbb" : "#555", fontFamily: "inherit", fontSize: 9, fontWeight: activeReqTab === tab ? 600 : 400, letterSpacing: 0.5, cursor: "pointer", textTransform: "uppercase" }}
-              >
-                {tab}{tab === "params" && routePathParams.length > 0 && <span style={{ color: "#854F0B", marginLeft: 3 }}>{routePathParams.length}</span>}
-              </button>
-            ))}
-          </div>
-
-          {/* Params */}
-          {activeReqTab === "params" && (
-            <div style={{ marginBottom: 8 }}>
-              {routePathParams.length === 0 ? (
-                <div style={{ fontSize: 10, color: "#444", padding: "8px 0", textAlign: "center" }}>
-                  {traceRouteId ? "No path parameters" : "Select a route first"}
-                </div>
-              ) : routePathParams.map((param) => (
-                <div key={param} style={{ marginBottom: 6 }}>
-                  <div style={{ fontSize: 9, color: "#854F0B", marginBottom: 2, fontWeight: 600 }}>:{param}</div>
-                  <input type="text" value={pathParams[param] || ""} onChange={(e) => setPathParams((prev) => ({ ...prev, [param]: e.target.value }))}
-                    placeholder={`value for :${param}`}
-                    style={{ width: "100%", background: "#0a0a0c", border: "0.5px solid #222", borderRadius: 4, padding: "5px 8px", color: "#ccc", fontFamily: "inherit", fontSize: 11, outline: "none", boxSizing: "border-box" }}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Body */}
-          {activeReqTab === "body" && (
-            <div style={{ marginBottom: 8 }}>
-              <textarea value={reqBody} onChange={(e) => setReqBody(e.target.value)} placeholder='{"action": "Generate", ...}' spellCheck={false}
-                style={{ width: "100%", minHeight: 100, background: "#0a0a0c", border: "0.5px solid #222", borderRadius: 4, padding: "8px", color: "#ccc", fontFamily: "inherit", fontSize: 11, outline: "none", boxSizing: "border-box", resize: "vertical", lineHeight: 1.5 }}
-              />
-            </div>
-          )}
-
-          {/* Simulate button */}
-          <button onClick={runSimulation} disabled={!traceRouteId || isTracing}
-            style={{ width: "100%", background: isTracing ? "#1a1a1e" : "#185FA5", border: "none", borderRadius: 5, padding: "8px 0", color: isTracing ? "#555" : "#fff", fontFamily: "inherit", fontSize: 11, fontWeight: 600, cursor: !traceRouteId || isTracing ? "default" : "pointer", opacity: !traceRouteId ? 0.4 : 1, letterSpacing: 0.5 }}
-          >{isTracing ? "Simulating..." : "Simulate"}</button>
-
-          {/* Trace status */}
-          {traceSteps.length > 0 && !isTracing && (
-            <div style={{ marginTop: 8, display: "flex", gap: 10, fontSize: 10, alignItems: "center" }}>
-              <span style={{ background: "#0e2e0e", color: "#7ac97a", padding: "2px 8px", borderRadius: 4, fontWeight: 700, fontSize: 10 }}>DONE</span>
-              <span style={{ color: "#555" }}>{traceSteps.length} steps</span>
-              <button onClick={clearTrace} style={{ marginLeft: "auto", background: "none", border: "none", color: "#555", fontFamily: "inherit", fontSize: 9, cursor: "pointer", textDecoration: "underline" }}>clear</button>
-            </div>
-          )}
-        </div>
-
-        {/* ── Inspector / Trace flow ── */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
-          {traceSteps.length > 0 ? (
-            /* ── Trace flow view ── */
-            <>
-              <div style={{ fontSize: 10, color: "#555", letterSpacing: 1, marginBottom: 10 }}>
-                TRACE FLOW
-                <span style={{ color: "#444", marginLeft: 6, letterSpacing: 0 }}>{traceVisible} / {traceSteps.length} steps</span>
-              </div>
-              {traceSteps.slice(0, traceVisible).map((step, i) => {
-                const colors = KIND_COLORS[step.kind] || KIND_COLORS.business_logic;
-                return (
-                  <div key={i} style={{ marginBottom: 2 }}>
-                    {/* connector arrow showing edge label */}
-                    {i > 0 && step.edgeLabel && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0 4px 16px" }}>
-                        <div style={{ width: 0, height: 0, borderLeft: "4px solid #378ADD", borderTop: "3px solid transparent", borderBottom: "3px solid transparent" }} />
-                        <span style={{ fontSize: 9, color: "#555", fontStyle: "italic" }}>{step.edgeLabel}</span>
-                      </div>
-                    )}
-                    {i > 0 && !step.edgeLabel && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 0 4px 16px" }}>
-                        <div style={{ width: 0, height: 0, borderLeft: "4px solid #378ADD", borderTop: "3px solid transparent", borderBottom: "3px solid transparent" }} />
-                      </div>
-                    )}
-                    {/* step card */}
-                    <div style={{ background: "#0a0a0c", border: `0.5px solid ${colors.border}33`, borderRadius: 6, padding: "8px 10px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                        <div style={{ fontSize: 8, background: colors.badgeBg, color: colors.badgeText, padding: "1px 4px", borderRadius: 2, fontWeight: 700 }}>
-                          {KIND_LABELS[step.kind] || step.kind.toUpperCase()}
-                        </div>
-                        <span style={{ fontSize: 10, color: "#bbb", fontWeight: 500 }}>{step.name}</span>
-                      </div>
-                      {step.description && (
-                        <div style={{ fontSize: 9, color: "#666", lineHeight: 1.4 }}>{step.description}</div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </>
-          ) : (
-            /* ── Inspector view ── */
-            <>
-              <div style={{ fontSize: 10, color: "#555", letterSpacing: 1, marginBottom: 8 }}>INSPECTOR</div>
-              {!selectedNode ? (
-                <div style={{ color: "#333", fontSize: 11, textAlign: "center", marginTop: 60, lineHeight: 1.6 }}>
-                  Click any node to inspect<br />its payload, mutations,<br />and connections
-                </div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <div style={{ fontSize: 13, color: "#ddd", fontWeight: 600 }}>{selectedNode.name}</div>
-
-                  <Field label="KIND">
-                    <span style={{ display: "inline-block", background: (KIND_COLORS[selectedNode.kind] || KIND_COLORS.business_logic).badgeBg, color: (KIND_COLORS[selectedNode.kind] || KIND_COLORS.business_logic).badgeText, fontSize: 9, fontWeight: 700, letterSpacing: 0.8, padding: "2px 6px", borderRadius: 3 }}>
-                      {KIND_LABELS[selectedNode.kind] || selectedNode.kind.toUpperCase()}
-                    </span>
-                  </Field>
-
-                  <Field label="DEFINED IN">{selectedNode.defined_in || "\u2014"}</Field>
-                  <Field label="INPUT">{selectedNode.input || "\u2014"}</Field>
-                  <Field label="OUTPUT">{selectedNode.output || "\u2014"}</Field>
-
-                  <Field label="MUTATES STATE">
-                    <span style={{ display: "inline-block", fontSize: 9, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: selectedNode.mutates_state ? "#2d1a0a" : "#0d1f0d", border: selectedNode.mutates_state ? "0.5px solid #633806" : "0.5px solid #27500A", color: selectedNode.mutates_state ? "#EF9F27" : "#639922" }}>
-                      {selectedNode.mutates_state ? "YES" : "NO"}
-                    </span>
-                  </Field>
-
-                  {selectedNode.description && <Field label="DESCRIPTION">{selectedNode.description}</Field>}
-
-                  {(() => {
-                    const inEdges = coreEdges.filter((e) => e.to === selectedNode.id);
-                    if (inEdges.length === 0) return null;
-                    return (
-                      <Field label={`RECEIVES FROM (${inEdges.length})`}>
-                        {inEdges.map((e, i) => (
-                          <div key={i} style={{ marginTop: i > 0 ? 6 : 0 }}>
-                            <div style={{ fontSize: 10, color: "#378ADD" }}>{nodeById(e.from)?.name || e.from}</div>
-                            {e.payload && <div style={{ fontSize: 9, color: "#555", marginTop: 1 }}>{e.payload}</div>}
-                          </div>
-                        ))}
-                      </Field>
-                    );
-                  })()}
-
-                  {(() => {
-                    const outEdges = coreEdges.filter((e) => e.from === selectedNode.id);
-                    if (outEdges.length === 0) return null;
-                    return (
-                      <Field label={`SENDS TO (${outEdges.length})`}>
-                        {outEdges.map((e, i) => (
-                          <div key={i} style={{ marginTop: i > 0 ? 6 : 0 }}>
-                            <div style={{ fontSize: 10, color: "#1D9E75" }}>{nodeById(e.to)?.name || e.to}</div>
-                            {e.payload && <div style={{ fontSize: 9, color: "#555", marginTop: 1 }}>{e.payload}</div>}
-                          </div>
-                        ))}
-                      </Field>
-                    );
-                  })()}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Back button */}
-        <div style={{ padding: "10px 14px", borderTop: "0.5px solid #1a1a1c" }}>
-          <button onClick={() => { setGraph(null); setSelectedId(null); setError(null); clearTrace(); }}
-            style={{ width: "100%", background: "transparent", border: "0.5px solid #222", borderRadius: 5, padding: "6px 0", color: "#555", fontFamily: "inherit", fontSize: 10, cursor: "pointer" }}
-          >&larr; load different file</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ── Inspector field ── */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div style={{ fontSize: 9, color: "#555", marginBottom: 3, letterSpacing: 0.5 }}>{label}</div>
-      <div style={{ background: "#0a0a0c", border: "0.5px solid #1a1a1c", borderRadius: 5, padding: "6px 8px", fontSize: 11, color: "#bbb", wordBreak: "break-word" }}>{children}</div>
+      <GraphCanvas
+        coreNodes={coreNodes}
+        coreEdges={coreEdges}
+        positions={positions}
+        tx={tx}
+        ty={ty}
+        scale={scale}
+        isPanning={isPanning}
+        selectedId={selectedId}
+        activeTraceIds={activeTraceIds}
+        traceHeadId={traceHeadId}
+        setSelectedId={setSelectedId}
+        handleCanvasMouseDown={handleCanvasMouseDown}
+        handleCanvasMouseMove={handleCanvasMouseMove}
+        handleCanvasMouseUp={handleCanvasMouseUp}
+        handleWheel={handleWheel}
+        handleCanvasClick={handleCanvasClick}
+        fitView={fitView}
+        setScale={setScale}
+      />
     </div>
   );
 }

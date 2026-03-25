@@ -1,0 +1,431 @@
+{
+  "meta": {
+    "scanned_at": "2026-03-25T14:00:00.000Z",
+    "workspace_path": "/tmp/tracelab-hashiraio-order-credentials",
+    "services_found": ["credential-manager"],
+    "files_scanned": 10,
+    "model": "manual-analysis"
+  },
+  "services": [
+    {
+      "id": "credential-manager",
+      "kind": "service",
+      "path": ".",
+      "description": "Manages generation, storage, retrieval, and update of encrypted order credentials with chain-specific address derivation"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "GET /health",
+      "service": "credential-manager",
+      "kind": "route_handler",
+      "name": "Health Check",
+      "input": "None",
+      "output": "\"Online\" (static string)",
+      "mutates_state": false,
+      "defined_in": "src/server/handlers.rs",
+      "description": "Returns 'Online' for health check / load balancer pings",
+      "method": "GET",
+      "path_pattern": "/health",
+      "handler": "server::handlers::get_health",
+      "example_payload": "{}"
+    },
+    {
+      "id": "POST /credentials/{secret}",
+      "service": "credential-manager",
+      "kind": "route_handler",
+      "name": "Credential Operations",
+      "input": "JSON body with action field (Generate|Retrieve|Update|RetrievePrivateKey)",
+      "output": "JSON response (action-dependent)",
+      "mutates_state": true,
+      "defined_in": "src/server/handlers.rs",
+      "description": "Main endpoint dispatching to generate, retrieve, update, or retrieve private key handlers based on action field and auth type from path secret",
+      "method": "POST",
+      "path_pattern": "/credentials/{secret}",
+      "handler": "server::handlers::handle_credentials",
+      "example_payload": "{\"action\": \"generate\", \"source_chain\": \"Bitcoin\", \"destination_chain\": \"Spark\"}"
+    },
+    {
+      "id": "auth_middleware",
+      "service": "credential-manager",
+      "kind": "middleware",
+      "name": "Authentication Middleware",
+      "input": "HTTP Request with path secret",
+      "output": "Request with AuthType extension injected",
+      "mutates_state": false,
+      "defined_in": "src/server/auth.rs",
+      "description": "Extracts secret from URL path, validates against configured secrets (generate/retrieve/retrieve_private_key), injects AuthType into request extensions. Returns 401 if invalid."
+    },
+    {
+      "id": "handle_generate_credentials",
+      "service": "credential-manager",
+      "kind": "business_logic",
+      "name": "Generate Credentials Handler",
+      "input": "GenerateRequest (secret_hash?, source_chain, destination_chain)",
+      "output": "GenerateCredentialsResponse (secret_hash, source_address?, destination_address?)",
+      "mutates_state": true,
+      "mutation_target": "order_credentials table",
+      "defined_in": "src/server/handlers.rs",
+      "description": "Validates chains, validates optional secret hash, determines if private key needed, generates and stores credentials, then derives blockchain addresses"
+    },
+    {
+      "id": "handle_retrieve_credentials",
+      "service": "credential-manager",
+      "kind": "business_logic",
+      "name": "Retrieve Credentials Handler",
+      "input": "RetrieveRequest (secret_hashes: Vec<String>)",
+      "output": "HashMap<String, Credentials>",
+      "mutates_state": false,
+      "defined_in": "src/server/handlers.rs",
+      "description": "Validates secret hashes, fetches encrypted credentials in batch, decrypts and returns them"
+    },
+    {
+      "id": "handle_update_credentials",
+      "service": "credential-manager",
+      "kind": "business_logic",
+      "name": "Update Credentials Handler",
+      "input": "UpdateRequest (secret: String)",
+      "output": "()",
+      "mutates_state": true,
+      "mutation_target": "order_credentials table",
+      "defined_in": "src/server/handlers.rs",
+      "description": "Parses hex secret, computes SHA256 hash, encrypts secret with AES-GCM, updates the secret column in DB"
+    },
+    {
+      "id": "handle_retrieve_private_keys",
+      "service": "credential-manager",
+      "kind": "business_logic",
+      "name": "Retrieve Private Keys Handler",
+      "input": "RetrieveRequest (secret_hashes: Vec<String>)",
+      "output": "HashMap<String, PrivateKeyResponse>",
+      "mutates_state": false,
+      "defined_in": "src/server/handlers.rs",
+      "description": "Fetches and decrypts only private keys for the given secret hashes"
+    },
+    {
+      "id": "validate_chains",
+      "service": "credential-manager",
+      "kind": "validator",
+      "name": "Chain Validator",
+      "input": "(source_chain: ChainType, destination_chain: ChainType)",
+      "output": "Result<(), String>",
+      "mutates_state": false,
+      "defined_in": "src/server/handlers.rs",
+      "description": "Validates that source and destination chains are different for UTXO-based chains (Bitcoin, Spark, Zcash, Litecoin, Alpen)"
+    },
+    {
+      "id": "validate_secret_hash",
+      "service": "credential-manager",
+      "kind": "validator",
+      "name": "Secret Hash Validator",
+      "input": "secret_hash: &str",
+      "output": "Result<()>",
+      "mutates_state": false,
+      "defined_in": "src/server/handlers.rs",
+      "description": "Validates that a secret hash is exactly 64 hex characters (32 bytes)"
+    },
+    {
+      "id": "chain_requires_private_key",
+      "service": "credential-manager",
+      "kind": "validator",
+      "name": "Chain Private Key Check",
+      "input": "ChainType",
+      "output": "bool",
+      "mutates_state": false,
+      "defined_in": "src/server/handlers.rs",
+      "description": "Returns true for Bitcoin, Litecoin, Alpen, Spark, Zcash — chains that need a private key for address generation"
+    },
+    {
+      "id": "generate_and_store_credentials",
+      "service": "credential-manager",
+      "kind": "business_logic",
+      "name": "Generate & Store Credentials",
+      "input": "(secret_hash: Option<String>, needs_private_key: bool)",
+      "output": "GeneratedCredentials (secret_hash, private_key?)",
+      "mutates_state": true,
+      "mutation_target": "order_credentials table",
+      "defined_in": "src/credentials/mod.rs",
+      "description": "Generates random 32-byte secret (or uses provided hash), computes SHA256, optionally generates secp256k1 keypair, encrypts with AES-GCM, stores in DB via upsert"
+    },
+    {
+      "id": "get_batch_credentials",
+      "service": "credential-manager",
+      "kind": "business_logic",
+      "name": "Get Batch Credentials",
+      "input": "secret_hashes: &[String] (max 200)",
+      "output": "HashMap<String, Credentials>",
+      "mutates_state": false,
+      "defined_in": "src/credentials/mod.rs",
+      "description": "Validates batch size <= 200, fetches encrypted records from DB, decrypts secret and private_key fields with AES-GCM"
+    },
+    {
+      "id": "update_credentials_logic",
+      "service": "credential-manager",
+      "kind": "business_logic",
+      "name": "Update Credentials Logic",
+      "input": "secret: &str (hex)",
+      "output": "()",
+      "mutates_state": true,
+      "mutation_target": "order_credentials table",
+      "defined_in": "src/credentials/mod.rs",
+      "description": "Parses hex secret to bytes, computes SHA256 hash, encrypts secret with AES-GCM cipher, calls store.update_credentials"
+    },
+    {
+      "id": "get_private_keys",
+      "service": "credential-manager",
+      "kind": "business_logic",
+      "name": "Get Private Keys",
+      "input": "secret_hashes: &[String] (max 200)",
+      "output": "HashMap<String, String>",
+      "mutates_state": false,
+      "defined_in": "src/credentials/mod.rs",
+      "description": "Validates batch size, fetches encrypted records, decrypts only the private_key field and returns hex-encoded keys"
+    },
+    {
+      "id": "sha256_hash",
+      "service": "credential-manager",
+      "kind": "transformer",
+      "name": "SHA256 Hasher",
+      "input": "secret bytes",
+      "output": "64-char lowercase hex hash string",
+      "mutates_state": false,
+      "defined_in": "src/credentials/mod.rs",
+      "description": "Computes SHA256 digest of secret bytes and returns lowercase hex-encoded hash"
+    },
+    {
+      "id": "aes_gcm_encrypt",
+      "service": "credential-manager",
+      "kind": "transformer",
+      "name": "AES-GCM Encrypt",
+      "input": "plaintext bytes (secret or private_key)",
+      "output": "hex-encoded ciphertext",
+      "mutates_state": false,
+      "defined_in": "src/credentials/mod.rs",
+      "description": "Encrypts data using AES-256-GCM cipher with the configured encryption key, returns lowercase hex string"
+    },
+    {
+      "id": "aes_gcm_decrypt",
+      "service": "credential-manager",
+      "kind": "transformer",
+      "name": "AES-GCM Decrypt",
+      "input": "hex-encoded ciphertext",
+      "output": "hex-encoded plaintext",
+      "mutates_state": false,
+      "defined_in": "src/credentials/mod.rs",
+      "description": "Decrypts AES-256-GCM encrypted data, returns hex-encoded plaintext bytes"
+    },
+    {
+      "id": "generate_addresses",
+      "service": "credential-manager",
+      "kind": "transformer",
+      "name": "Address Generator",
+      "input": "([u8; 32] private_key, source_chain, destination_chain, is_testnet)",
+      "output": "(Option<source_address>, Option<destination_address>)",
+      "mutates_state": false,
+      "defined_in": "src/server/handlers.rs",
+      "description": "Derives blockchain addresses from private key for source and destination chains. Dispatches to chain-specific generators."
+    },
+    {
+      "id": "generate_x_only_public_key",
+      "service": "credential-manager",
+      "kind": "transformer",
+      "name": "X-Only Public Key Generator",
+      "input": "SecretKey (for Bitcoin, Litecoin, Alpen)",
+      "output": "64-char hex x-only public key",
+      "mutates_state": false,
+      "defined_in": "src/credentials/address.rs",
+      "description": "Derives Bitcoin x-only public key (32 bytes) from secp256k1 secret key"
+    },
+    {
+      "id": "generate_compressed_public_key",
+      "service": "credential-manager",
+      "kind": "transformer",
+      "name": "Compressed Public Key Generator",
+      "input": "SecretKey (for Zcash)",
+      "output": "66-char hex compressed public key (33 bytes, 02/03 prefix)",
+      "mutates_state": false,
+      "defined_in": "src/credentials/address.rs",
+      "description": "Derives compressed secp256k1 public key for Zcash"
+    },
+    {
+      "id": "generate_spark_address",
+      "service": "credential-manager",
+      "kind": "transformer",
+      "name": "Spark Address Generator",
+      "input": "([u8; 32] seed, Network)",
+      "output": "Spark address string",
+      "mutates_state": false,
+      "defined_in": "src/credentials/address.rs",
+      "description": "Creates Spark/Lightning address from seed using KeySet and SparkAddress"
+    },
+    {
+      "id": "db_init_schema",
+      "service": "credential-manager",
+      "kind": "db_call",
+      "name": "Schema Initialization",
+      "input": "Pool<Postgres>",
+      "output": "()",
+      "mutates_state": true,
+      "mutation_target": "order_credentials table DDL",
+      "defined_in": "src/credentials/store.rs",
+      "description": "Creates order_credentials table if not exists, runs migrations (drop legacy columns, make columns nullable, clean empty values)"
+    },
+    {
+      "id": "db_insert_credentials",
+      "service": "credential-manager",
+      "kind": "db_call",
+      "name": "Insert Credentials",
+      "input": "(secret_hash, encrypted_secret?, encrypted_private_key?)",
+      "output": "CredentialsRecord",
+      "mutates_state": true,
+      "mutation_target": "order_credentials table",
+      "defined_in": "src/credentials/store.rs",
+      "description": "INSERT INTO order_credentials with ON CONFLICT DO UPDATE (upsert). Returns the stored record."
+    },
+    {
+      "id": "db_get_credentials",
+      "service": "credential-manager",
+      "kind": "db_call",
+      "name": "Get Encrypted Credentials",
+      "input": "secret_hashes: &[String]",
+      "output": "Vec<CredentialsRecord>",
+      "mutates_state": false,
+      "defined_in": "src/credentials/store.rs",
+      "description": "SELECT secret_hash, secret, private_key FROM order_credentials WHERE secret_hash = ANY($1)"
+    },
+    {
+      "id": "db_update_credentials",
+      "service": "credential-manager",
+      "kind": "db_call",
+      "name": "Update Credential Secret",
+      "input": "(encrypted_secret, secret_hash)",
+      "output": "()",
+      "mutates_state": true,
+      "mutation_target": "order_credentials.secret column",
+      "defined_in": "src/credentials/store.rs",
+      "description": "UPDATE order_credentials SET secret = $1 WHERE secret_hash = $2. Errors if no row found."
+    }
+  ],
+  "edges": [
+    {"from": "POST /credentials/{secret}", "to": "auth_middleware", "payload": "HTTP Request with path secret", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "auth_middleware", "to": "handle_generate_credentials", "payload": "Request + AuthType::Generate + GenerateRequest", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "auth_middleware", "to": "handle_retrieve_credentials", "payload": "Request + AuthType::Retrieve + RetrieveRequest", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "auth_middleware", "to": "handle_update_credentials", "payload": "Request + AuthType::Retrieve + UpdateRequest", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "auth_middleware", "to": "handle_retrieve_private_keys", "payload": "Request + AuthType::RetrievePrivateKey + RetrieveRequest", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "handle_generate_credentials", "to": "validate_chains", "payload": "(source_chain, destination_chain)", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "handle_generate_credentials", "to": "validate_secret_hash", "payload": "Option<String> secret_hash", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "handle_generate_credentials", "to": "chain_requires_private_key", "payload": "ChainType", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "handle_generate_credentials", "to": "generate_and_store_credentials", "payload": "(Option<secret_hash>, needs_private_key: bool)", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "handle_generate_credentials", "to": "generate_addresses", "payload": "([u8; 32] private_key, source_chain, dest_chain, is_testnet)", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "handle_retrieve_credentials", "to": "validate_secret_hash", "payload": "Vec<String> secret_hashes", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "handle_retrieve_credentials", "to": "get_batch_credentials", "payload": "Vec<String> secret_hashes", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "handle_update_credentials", "to": "update_credentials_logic", "payload": "String (hex secret)", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "handle_retrieve_private_keys", "to": "validate_secret_hash", "payload": "Vec<String> secret_hashes", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "handle_retrieve_private_keys", "to": "get_private_keys", "payload": "Vec<String> secret_hashes", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "generate_and_store_credentials", "to": "sha256_hash", "payload": "secret bytes", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "generate_and_store_credentials", "to": "aes_gcm_encrypt", "payload": "secret + private_key plaintext", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "generate_and_store_credentials", "to": "db_insert_credentials", "payload": "(secret_hash, encrypted_secret, encrypted_private_key)", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "generate_addresses", "to": "generate_x_only_public_key", "payload": "SecretKey (for Bitcoin, Litecoin, Alpen)", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "generate_addresses", "to": "generate_compressed_public_key", "payload": "SecretKey (for Zcash)", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "generate_addresses", "to": "generate_spark_address", "payload": "([u8; 32] seed, Network) (for Spark, Lightning)", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "get_batch_credentials", "to": "db_get_credentials", "payload": "Vec<String> secret_hashes", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "get_batch_credentials", "to": "aes_gcm_decrypt", "payload": "hex-encoded encrypted fields", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "update_credentials_logic", "to": "sha256_hash", "payload": "secret bytes", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "update_credentials_logic", "to": "aes_gcm_encrypt", "payload": "secret plaintext", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "update_credentials_logic", "to": "db_update_credentials", "payload": "(encrypted_secret, secret_hash)", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "get_private_keys", "to": "db_get_credentials", "payload": "Vec<String> secret_hashes", "from_service": "credential-manager", "to_service": "credential-manager"},
+    {"from": "get_private_keys", "to": "aes_gcm_decrypt", "payload": "hex-encoded encrypted private keys", "from_service": "credential-manager", "to_service": "credential-manager"}
+  ],
+  "mutations": [
+    {"id": "mut_insert_creds", "service": "credential-manager", "kind": "mutation", "mutates": "order_credentials table (INSERT/upsert)", "via": "sqlx::query", "in_component": "db_insert_credentials", "defined_in": "src/credentials/store.rs"},
+    {"id": "mut_update_secret", "service": "credential-manager", "kind": "mutation", "mutates": "order_credentials.secret column (UPDATE)", "via": "sqlx::query", "in_component": "db_update_credentials", "defined_in": "src/credentials/store.rs"},
+    {"id": "mut_init_schema", "service": "credential-manager", "kind": "mutation", "mutates": "order_credentials table DDL (CREATE TABLE, ALTER)", "via": "sqlx::query", "in_component": "db_init_schema", "defined_in": "src/credentials/store.rs"}
+  ],
+  "cross_service_calls": [],
+  "external_packages": [
+    {"crate": "axum", "used_in_services": ["credential-manager"], "purpose": "HTTP server framework for routes, middleware, and request handling"},
+    {"crate": "sqlx", "used_in_services": ["credential-manager"], "purpose": "Async PostgreSQL database driver for credential storage"},
+    {"crate": "aes-gcm", "used_in_services": ["credential-manager"], "purpose": "AES-256-GCM encryption/decryption of secrets and private keys"},
+    {"crate": "sha2", "used_in_services": ["credential-manager"], "purpose": "SHA256 hashing of secrets for lookup keys"},
+    {"crate": "bitcoin", "used_in_services": ["credential-manager"], "purpose": "secp256k1 key generation and x-only/compressed public key derivation"},
+    {"crate": "spark-wallet", "used_in_services": ["credential-manager"], "purpose": "Spark/Lightning address generation from seed keys"},
+    {"crate": "tower", "used_in_services": ["credential-manager"], "purpose": "Middleware layer for authentication service"},
+    {"crate": "tower-http", "used_in_services": ["credential-manager"], "purpose": "CORS, request body limits, compression middleware"}
+  ],
+  "traces": [
+    {
+      "route_id": "GET /health",
+      "label": "Health Check",
+      "description": "Simple health check returning 'Online'",
+      "example_payload": {},
+      "steps": [
+        {"node_id": "GET /health", "edge_label": "", "summary": "Returns static string 'Online'"}
+      ]
+    },
+    {
+      "route_id": "POST /credentials/{secret}",
+      "label": "Generate Credentials",
+      "description": "Generate new credentials with secret hash and blockchain addresses for source/destination chains",
+      "example_payload": {"action": "generate", "source_chain": "Bitcoin", "destination_chain": "Spark"},
+      "steps": [
+        {"node_id": "POST /credentials/{secret}", "edge_label": "", "summary": "Receives POST request, deserializes CredentialRequest with action='generate'"},
+        {"node_id": "auth_middleware", "edge_label": "HTTP Request with path secret", "summary": "Extracts secret from URL path, validates against generate_secret, injects AuthType::Generate"},
+        {"node_id": "handle_generate_credentials", "edge_label": "Request + AuthType::Generate + GenerateRequest", "summary": "Dispatched because auth=Generate matches action=Generate. Extracts source_chain and destination_chain."},
+        {"node_id": "validate_chains", "edge_label": "(source_chain, destination_chain)", "summary": "Validates Bitcoin != Spark, passes (different chains allowed)"},
+        {"node_id": "chain_requires_private_key", "edge_label": "ChainType", "summary": "Bitcoin requires private key → true. Spark requires private key → true. needs_private_key = true"},
+        {"node_id": "generate_and_store_credentials", "edge_label": "(Option<secret_hash>, needs_private_key: bool)", "summary": "Generates random 32-byte secret, creates secp256k1 keypair since needs_private_key=true"},
+        {"node_id": "sha256_hash", "edge_label": "secret bytes", "summary": "Computes SHA256 of the random secret → 64-char hex hash"},
+        {"node_id": "aes_gcm_encrypt", "edge_label": "secret + private_key plaintext", "summary": "Encrypts secret and private key with AES-256-GCM → hex ciphertext"},
+        {"node_id": "db_insert_credentials", "edge_label": "(secret_hash, encrypted_secret, encrypted_private_key)", "summary": "INSERT INTO order_credentials with ON CONFLICT upsert. Returns stored record."},
+        {"node_id": "generate_addresses", "edge_label": "([u8; 32] private_key, source_chain, dest_chain, is_testnet)", "summary": "Derives addresses for Bitcoin (source) and Spark (destination)"},
+        {"node_id": "generate_x_only_public_key", "edge_label": "SecretKey (for Bitcoin, Litecoin, Alpen)", "summary": "Derives x-only public key (32 bytes hex) for Bitcoin source address"},
+        {"node_id": "generate_spark_address", "edge_label": "([u8; 32] seed, Network) (for Spark, Lightning)", "summary": "Creates Spark address from private key seed for destination"}
+      ]
+    },
+    {
+      "route_id": "POST /credentials/{secret}",
+      "label": "Retrieve Credentials",
+      "description": "Retrieve and decrypt stored credentials by secret hashes",
+      "example_payload": {"action": "retrieve", "secret_hashes": ["a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"]},
+      "steps": [
+        {"node_id": "POST /credentials/{secret}", "edge_label": "", "summary": "Receives POST request, deserializes CredentialRequest with action='retrieve'"},
+        {"node_id": "auth_middleware", "edge_label": "HTTP Request with path secret", "summary": "Extracts secret from URL path, validates against retrieve_secret, injects AuthType::Retrieve"},
+        {"node_id": "handle_retrieve_credentials", "edge_label": "Request + AuthType::Retrieve + RetrieveRequest", "summary": "Dispatched because auth=Retrieve matches action=Retrieve. Extracts secret_hashes array."},
+        {"node_id": "validate_secret_hash", "edge_label": "Vec<String> secret_hashes", "summary": "Validates each hash is exactly 64 hex characters"},
+        {"node_id": "get_batch_credentials", "edge_label": "Vec<String> secret_hashes", "summary": "Validates batch size <= 200, queries DB for encrypted records"},
+        {"node_id": "db_get_credentials", "edge_label": "Vec<String> secret_hashes", "summary": "SELECT secret_hash, secret, private_key FROM order_credentials WHERE secret_hash = ANY($1)"},
+        {"node_id": "aes_gcm_decrypt", "edge_label": "hex-encoded encrypted fields", "summary": "Decrypts secret and private_key fields → hex plaintext. Returns HashMap<hash, Credentials>."}
+      ]
+    },
+    {
+      "route_id": "POST /credentials/{secret}",
+      "label": "Update Credentials",
+      "description": "Update the secret for existing credentials (user-managed secret)",
+      "example_payload": {"action": "update", "secret": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"},
+      "steps": [
+        {"node_id": "POST /credentials/{secret}", "edge_label": "", "summary": "Receives POST request, deserializes CredentialRequest with action='update'"},
+        {"node_id": "auth_middleware", "edge_label": "HTTP Request with path secret", "summary": "Extracts secret from URL path, validates against retrieve_secret, injects AuthType::Retrieve"},
+        {"node_id": "handle_update_credentials", "edge_label": "Request + AuthType::Retrieve + UpdateRequest", "summary": "Dispatched because auth=Retrieve matches action=Update. Extracts hex secret string."},
+        {"node_id": "update_credentials_logic", "edge_label": "String (hex secret)", "summary": "Parses hex to bytes, computes hash, encrypts, updates DB"},
+        {"node_id": "sha256_hash", "edge_label": "secret bytes", "summary": "Computes SHA256 of the secret bytes → secret_hash for lookup"},
+        {"node_id": "aes_gcm_encrypt", "edge_label": "secret plaintext", "summary": "Encrypts the secret bytes with AES-256-GCM → encrypted_secret"},
+        {"node_id": "db_update_credentials", "edge_label": "(encrypted_secret, secret_hash)", "summary": "UPDATE order_credentials SET secret = $1 WHERE secret_hash = $2"}
+      ]
+    },
+    {
+      "route_id": "POST /credentials/{secret}",
+      "label": "Retrieve Private Keys",
+      "description": "Retrieve only private keys (not full credentials) for given secret hashes",
+      "example_payload": {"action": "retrieve_private_key", "secret_hashes": ["a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"]},
+      "steps": [
+        {"node_id": "POST /credentials/{secret}", "edge_label": "", "summary": "Receives POST request, deserializes CredentialRequest with action='retrieve_private_key'"},
+        {"node_id": "auth_middleware", "edge_label": "HTTP Request with path secret", "summary": "Extracts secret from URL path, validates against retrieve_private_key_secret, injects AuthType::RetrievePrivateKey"},
+        {"node_id": "handle_retrieve_private_keys", "edge_label": "Request + AuthType::RetrievePrivateKey + RetrieveRequest", "summary": "Dispatched because auth=RetrievePrivateKey matches action=RetrievePrivateKey"},
+        {"node_id": "validate_secret_hash", "edge_label": "Vec<String> secret_hashes", "summary": "Validates each hash is exactly 64 hex characters"},
+        {"node_id": "get_private_keys", "edge_label": "Vec<String> secret_hashes", "summary": "Validates batch size <= 200, queries DB for encrypted records"},
+        {"node_id": "db_get_credentials", "edge_label": "Vec<String> secret_hashes", "summary": "SELECT secret_hash, secret, private_key FROM order_credentials WHERE secret_hash = ANY($1)"},
+        {"node_id": "aes_gcm_decrypt", "edge_label": "hex-encoded encrypted private keys", "summary": "Decrypts only private_key fields → hex plaintext. Returns HashMap<hash, PrivateKeyResponse>."}
+      ]
+    }
+  ]
+}
