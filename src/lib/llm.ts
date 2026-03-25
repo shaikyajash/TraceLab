@@ -12,7 +12,7 @@ interface LLMConfig {
 const PROVIDER_CONFIGS: Record<LLMProvider, { model: string }> = {
   claude: { model: "claude-sonnet-4-6-20250514" },
   gemini: { model: "gemini-2.5-flash" },
-  openai: { model: "gpt-4.1" },
+  openai: { model: "gpt-4o-mini" },
 };
 
 // Runtime override — set by API routes per-request

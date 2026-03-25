@@ -584,7 +584,9 @@ export default function Home() {
       for (const trace of precomputed) {
         let score = 0;
         const payloadVals = Object.values(payload).map((v) => String(v).toLowerCase());
-        const exampleVals = Object.values(trace.example_payload).map((v) => String(v).toLowerCase());
+        const exampleVals = trace.example_payload
+          ? Object.values(trace.example_payload).map((v) => String(v).toLowerCase())
+          : [];
         for (const pv of payloadVals) {
           for (const ev of exampleVals) {
             if (pv === ev) score += 10;
