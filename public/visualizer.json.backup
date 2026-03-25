@@ -1,0 +1,191 @@
+{
+  "servers": [
+    {
+      "id": "test-server",
+      "name": "TraceLab Test Server",
+      "port": 3000,
+      "language": "typescript",
+      "routes": [
+        {
+          "id": "create-user",
+          "path": "/api/test-users",
+          "method": "POST",
+          "handler": "POST handler",
+          "examplePayload": {
+            "name": "John Doe",
+            "email": "john@example.com",
+            "age": 30
+          },
+          "flowSteps": [
+            {
+              "componentId": "validator",
+              "functionName": "validateUserInput",
+              "order": 0,
+              "dataTransformation": {
+                "input": "raw request body",
+                "output": "validated user data",
+                "description": "Validates email format and required fields"
+              }
+            },
+            {
+              "componentId": "user-service",
+              "functionName": "createUser",
+              "order": 1,
+              "dataTransformation": {
+                "input": "validated user data",
+                "output": "user with generated ID",
+                "description": "Generates user ID and timestamps"
+              }
+            },
+            {
+              "componentId": "user-repository",
+              "functionName": "save",
+              "order": 2,
+              "dataTransformation": {
+                "input": "user with ID",
+                "output": "persisted user record",
+                "description": "Saves to database"
+              }
+            },
+            {
+              "componentId": "notification-service",
+              "functionName": "sendWelcomeEmail",
+              "order": 3,
+              "dataTransformation": {
+                "input": "user record",
+                "output": "email confirmation",
+                "description": "Sends welcome email"
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-users",
+          "path": "/api/test-users",
+          "method": "GET",
+          "handler": "GET handler",
+          "examplePayload": {},
+          "flowSteps": [
+            {
+              "componentId": "user-service",
+              "functionName": "getAllUsers",
+              "order": 0,
+              "dataTransformation": {
+                "input": "empty",
+                "output": "user list",
+                "description": "Fetches all users"
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-user-by-id",
+          "path": "/api/test-users/:id",
+          "method": "GET",
+          "handler": "GET [id] handler",
+          "examplePayload": {},
+          "flowSteps": [
+            {
+              "componentId": "validator",
+              "functionName": "validateUserId",
+              "order": 0,
+              "dataTransformation": {
+                "input": "user ID",
+                "output": "validated ID",
+                "description": "Validates user ID format"
+              }
+            },
+            {
+              "componentId": "user-repository",
+              "functionName": "findById",
+              "order": 1,
+              "dataTransformation": {
+                "input": "user ID",
+                "output": "user record",
+                "description": "Fetches user from database"
+              }
+            }
+          ]
+        }
+      ],
+      "internalComponents": [
+        {
+          "id": "validator",
+          "name": "Validator",
+          "type": "middleware",
+          "filePath": "test-server/middleware/validator.ts",
+          "functions": [
+            {
+              "name": "validateUserInput",
+              "params": ["any"],
+              "returns": "ValidationResult",
+              "transformsData": true
+            },
+            {
+              "name": "validateUserId",
+              "params": ["string"],
+              "returns": "boolean",
+              "transformsData": false
+            }
+          ]
+        },
+        {
+          "id": "user-service",
+          "name": "UserService",
+          "type": "service",
+          "filePath": "test-server/services/userService.ts",
+          "functions": [
+            {
+              "name": "createUser",
+              "params": ["CreateUserInput"],
+              "returns": "Promise<User>",
+              "transformsData": true
+            },
+            {
+              "name": "getAllUsers",
+              "params": [],
+              "returns": "Promise<User[]>",
+              "transformsData": false
+            }
+          ]
+        },
+        {
+          "id": "user-repository",
+          "name": "UserRepository",
+          "type": "repository",
+          "filePath": "test-server/repositories/userRepository.ts",
+          "functions": [
+            {
+              "name": "save",
+              "params": ["User"],
+              "returns": "Promise<User>",
+              "transformsData": false
+            },
+            {
+              "name": "findById",
+              "params": ["string"],
+              "returns": "Promise<User | null>",
+              "transformsData": false
+            }
+          ]
+        },
+        {
+          "id": "notification-service",
+          "name": "NotificationService",
+          "type": "service",
+          "filePath": "test-server/services/notificationService.ts",
+          "functions": [
+            {
+              "name": "sendWelcomeEmail",
+              "params": ["string", "string"],
+              "returns": "Promise<void>",
+              "transformsData": false
+            }
+          ]
+        }
+      ],
+      "externalCalls": []
+    }
+  ],
+  "externalServices": []
+}

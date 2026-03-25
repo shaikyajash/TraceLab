@@ -1,0 +1,1521 @@
+{
+  "servers": [
+    {
+      "id": "nextjs-api-server",
+      "name": "Next.js API Server",
+      "port": 443,
+      "language": "typescript",
+      "routes": [
+        {
+          "id": "admin-dashboard-get",
+          "path": "/api/admin/dashboard",
+          "method": "GET",
+          "handler": "GET",
+          "examplePayload": null,
+          "flowSteps": [
+            {
+              "componentId": "nextjs-middleware",
+              "functionName": "middleware",
+              "order": 0,
+              "dataTransformation": {
+                "input": "NextRequest (contains cookies)",
+                "output": "NextResponse or redirection",
+                "description": "Checks if the path is an admin route and if a 'token' cookie exists. Redirects to /auth/login if not authenticated. This API route itself handles further admin role verification."
+              }
+            },
+            {
+              "componentId": "route-handler-admin-dashboard-get",
+              "functionName": "GET",
+              "order": 1,
+              "dataTransformation": {
+                "input": "Request headers (cookies)",
+                "output": "Dashboard summary object (JSON)",
+                "description": "Extracts userId from 'token' cookie, verifies user's 'admin' role, then fetches aggregated counts (users, products, orders, referrals), role-based user counts, total sales, recent orders, recent users, and monthly sales data from the database."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.id, userId))",
+              "order": 2,
+              "dataTransformation": {
+                "input": "userId (from cookie)",
+                "output": "adminUser (user record)",
+                "description": "Fetches user details to verify admin role."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select({ count: sql<number>`COUNT(*)` }).from(users)",
+              "order": 3,
+              "dataTransformation": {
+                "input": "N/A",
+                "output": "{ count: number }",
+                "description": "Counts total users."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(payments).where(eq(payments.status, 'captured'))",
+              "order": 4,
+              "dataTransformation": {
+                "input": "N/A",
+                "output": "Array of captured payment records",
+                "description": "Retrieves all completed payments to calculate total sales."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(orders).orderBy(sql`${orders.createdAt} DESC`).limit(5)",
+              "order": 5,
+              "dataTransformation": {
+                "input": "N/A",
+                "output": "Array of 5 most recent order records",
+                "description": "Fetches recent orders for display."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select({ ... }).from(users).orderBy(sql`${users.createdAt} DESC`).limit(5)",
+              "order": 6,
+              "dataTransformation": {
+                "input": "N/A",
+                "output": "Array of 5 most recent user records (selected fields)",
+                "description": "Fetches recent users for display, excluding sensitive fields."
+              }
+            },
+            {
+              "componentId": "route-handler-admin-dashboard-get",
+              "functionName": "GET (monthlySales loop)",
+              "order": 7,
+              "dataTransformation": {
+                "input": "Current date, payments data",
+                "output": "Array of { month, year, total } sales figures",
+                "description": "Calculates total captured sales for the last 6 months by querying payments within date ranges."
+              }
+            }
+          ]
+        },
+        {
+          "id": "admin-orders-get",
+          "path": "/api/admin/orders",
+          "method": "GET",
+          "handler": "GET",
+          "examplePayload": {
+            "query": {
+              "page": 1,
+              "limit": 10
+            }
+          },
+          "flowSteps": [
+            {
+              "componentId": "nextjs-middleware",
+              "functionName": "middleware",
+              "order": 0,
+              "dataTransformation": {
+                "input": "NextRequest (contains cookies)",
+                "output": "NextResponse or redirection",
+                "description": "Checks if the path is an admin route and if a 'token' cookie exists. Redirects to /auth/login if not authenticated. This API route itself handles further admin role verification."
+              }
+            },
+            {
+              "componentId": "route-handler-admin-orders-get",
+              "functionName": "GET",
+              "order": 1,
+              "dataTransformation": {
+                "input": "Request (query params: page, limit), Request headers (cookies)",
+                "output": "Paginated list of orders with detailed items, payments, and customer info (JSON)",
+                "description": "Extracts userId from 'token' cookie, verifies user's 'admin' role, then fetches paginated orders and enriches each order with its items, associated products, payment details, and customer information from the database."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.id, userId))",
+              "order": 2,
+              "dataTransformation": {
+                "input": "userId (from cookie)",
+                "output": "adminUser (user record)",
+                "description": "Fetches user details to verify admin role."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(orders).orderBy(desc(orders.createdAt)).limit(limit).offset(offset)",
+              "order": 3,
+              "dataTransformation": {
+                "input": "Pagination parameters (limit, offset)",
+                "output": "Array of order records",
+                "description": "Fetches a paginated list of orders."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select({ count: sql<number>`COUNT(*)` }).from(orders)",
+              "order": 4,
+              "dataTransformation": {
+                "input": "N/A",
+                "output": "{ count: number }",
+                "description": "Counts total number of orders."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(orderItems).where(eq(orderItems.orderId, order.id))",
+              "order": 5,
+              "dataTransformation": {
+                "input": "order.id",
+                "output": "Array of order item records",
+                "description": "Retrieves items for a specific order."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(products).where(eq(products.id, item.productId))",
+              "order": 6,
+              "dataTransformation": {
+                "input": "item.productId",
+                "output": "product record",
+                "description": "Retrieves product details for each order item."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(payments).where(eq(payments.orderId, order.id))",
+              "order": 7,
+              "dataTransformation": {
+                "input": "order.id",
+                "output": "payment record",
+                "description": "Retrieves payment details for a specific order."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select({ ... }).from(users).where(eq(users.id, order.userId))",
+              "order": 8,
+              "dataTransformation": {
+                "input": "order.userId",
+                "output": "customer record (selected fields)",
+                "description": "Retrieves customer details for a specific order."
+              }
+            }
+          ]
+        },
+        {
+          "id": "admin-products-get",
+          "path": "/api/admin/products",
+          "method": "GET",
+          "handler": "GET",
+          "examplePayload": {
+            "query": {
+              "page": 1,
+              "limit": 10
+            }
+          },
+          "flowSteps": [
+            {
+              "componentId": "nextjs-middleware",
+              "functionName": "middleware",
+              "order": 0,
+              "dataTransformation": {
+                "input": "NextRequest (contains cookies)",
+                "output": "NextResponse or redirection",
+                "description": "Checks if the path is an admin route and if a 'token' cookie exists. Redirects to /auth/login if not authenticated. This API route itself handles further admin role verification."
+              }
+            },
+            {
+              "componentId": "route-handler-admin-products-get",
+              "functionName": "GET",
+              "order": 1,
+              "dataTransformation": {
+                "input": "Request (query params: page, limit), Request headers (cookies)",
+                "output": "Paginated list of products with seller info (JSON)",
+                "description": "Extracts userId from 'token' cookie, verifies user's 'admin' role, then fetches paginated products and enriches each product with its seller's information from the database."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.id, userId))",
+              "order": 2,
+              "dataTransformation": {
+                "input": "userId (from cookie)",
+                "output": "adminUser (user record)",
+                "description": "Fetches user details to verify admin role."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(products).limit(limit).offset(offset)",
+              "order": 3,
+              "dataTransformation": {
+                "input": "Pagination parameters (limit, offset)",
+                "output": "Array of product records",
+                "description": "Fetches a paginated list of products."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select({ count: sql<number>`COUNT(*)` }).from(products)",
+              "order": 4,
+              "dataTransformation": {
+                "input": "N/A",
+                "output": "{ count: number }",
+                "description": "Counts total number of products."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select({ ... }).from(users).where(eq(users.id, product.sellerId))",
+              "order": 5,
+              "dataTransformation": {
+                "input": "product.sellerId",
+                "output": "seller record (selected fields)",
+                "description": "Retrieves seller details for each product."
+              }
+            }
+          ]
+        },
+        {
+          "id": "admin-referrals-get",
+          "path": "/api/admin/referrals",
+          "method": "GET",
+          "handler": "GET",
+          "examplePayload": {
+            "query": {
+              "page": 1,
+              "limit": 10
+            }
+          },
+          "flowSteps": [
+            {
+              "componentId": "nextjs-middleware",
+              "functionName": "middleware",
+              "order": 0,
+              "dataTransformation": {
+                "input": "NextRequest (contains cookies)",
+                "output": "NextResponse or redirection",
+                "description": "Checks if the path is an admin route and if a 'token' cookie exists. Redirects to /auth/login if not authenticated. This API route itself handles further admin role verification."
+              }
+            },
+            {
+              "componentId": "route-handler-admin-referrals-get",
+              "functionName": "GET",
+              "order": 1,
+              "dataTransformation": {
+                "input": "Request (query params: page, limit), Request headers (cookies)",
+                "output": "Paginated list of referrals with referrer and referred user info (JSON)",
+                "description": "Extracts userId from 'token' cookie, verifies user's 'admin' role, then fetches paginated referral records and enriches each with details of the referrer and the referred user from the database."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.id, userId))",
+              "order": 2,
+              "dataTransformation": {
+                "input": "userId (from cookie)",
+                "output": "adminUser (user record)",
+                "description": "Fetches user details to verify admin role."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(referrals).limit(limit).offset(offset)",
+              "order": 3,
+              "dataTransformation": {
+                "input": "Pagination parameters (limit, offset)",
+                "output": "Array of referral records",
+                "description": "Fetches a paginated list of referrals."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select({ count: sql<number>`COUNT(*)` }).from(referrals)",
+              "order": 4,
+              "dataTransformation": {
+                "input": "N/A",
+                "output": "{ count: number }",
+                "description": "Counts total number of referrals."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select({ ... }).from(users).where(eq(users.id, referral.referrerId))",
+              "order": 5,
+              "dataTransformation": {
+                "input": "referral.referrerId",
+                "output": "referrer user record (selected fields)",
+                "description": "Retrieves details of the referrer for each referral."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select({ ... }).from(users).where(eq(users.id, referral.referredId))",
+              "order": 6,
+              "dataTransformation": {
+                "input": "referral.referredId",
+                "output": "referred user record (selected fields)",
+                "description": "Retrieves details of the referred user for each referral."
+              }
+            }
+          ]
+        },
+        {
+          "id": "admin-users-get",
+          "path": "/api/admin/users",
+          "method": "GET",
+          "handler": "GET",
+          "examplePayload": {
+            "query": {
+              "page": 1,
+              "limit": 10
+            }
+          },
+          "flowSteps": [
+            {
+              "componentId": "nextjs-middleware",
+              "functionName": "middleware",
+              "order": 0,
+              "dataTransformation": {
+                "input": "NextRequest (contains cookies)",
+                "output": "NextResponse or redirection",
+                "description": "Checks if the path is an admin route and if a 'token' cookie exists. Redirects to /auth/login if not authenticated. This API route itself handles further admin role verification."
+              }
+            },
+            {
+              "componentId": "route-handler-admin-users-get",
+              "functionName": "GET",
+              "order": 1,
+              "dataTransformation": {
+                "input": "Request (query params: page, limit), Request headers (cookies)",
+                "output": "Paginated list of users with masked sensitive data and bank details (JSON)",
+                "description": "Extracts userId from 'token' cookie, verifies user's 'admin' role, then fetches paginated user records, masks email and account numbers, removes password, and enriches each user with their bank details from the database."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.id, userId))",
+              "order": 2,
+              "dataTransformation": {
+                "input": "userId (from cookie)",
+                "output": "adminUser (user record)",
+                "description": "Fetches user details to verify admin role."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).limit(limit).offset(offset)",
+              "order": 3,
+              "dataTransformation": {
+                "input": "Pagination parameters (limit, offset)",
+                "output": "Array of user records",
+                "description": "Fetches a paginated list of users."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select({ count: sql<number>`COUNT(*)` }).from(users)",
+              "order": 4,
+              "dataTransformation": {
+                "input": "N/A",
+                "output": "{ count: number }",
+                "description": "Counts total number of users."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(bankDetails).where(eq(bankDetails.userId, user.id))",
+              "order": 5,
+              "dataTransformation": {
+                "input": "user.id",
+                "output": "Array of bankDetails records",
+                "description": "Retrieves bank details for each user."
+              }
+            },
+            {
+              "componentId": "route-handler-admin-users-get",
+              "functionName": "GET (data masking)",
+              "order": 6,
+              "dataTransformation": {
+                "input": "User and bank detail records",
+                "output": "User and bank detail records with `password` removed, `email` masked, and `accountNumber` masked.",
+                "description": "Masks sensitive user data (email, account number) and removes password field before sending response."
+              }
+            }
+          ]
+        },
+        {
+          "id": "admin-users-id-get",
+          "path": "/api/admin/users/{id}",
+          "method": "GET",
+          "handler": "GET",
+          "examplePayload": null,
+          "flowSteps": [
+            {
+              "componentId": "nextjs-middleware",
+              "functionName": "middleware",
+              "order": 0,
+              "dataTransformation": {
+                "input": "NextRequest (contains cookies)",
+                "output": "NextResponse or redirection",
+                "description": "Checks if the path is an admin route and if a 'token' cookie exists. Redirects to /auth/login if not authenticated. This API route itself handles further admin role verification."
+              }
+            },
+            {
+              "componentId": "route-handler-admin-users-id-get",
+              "functionName": "GET",
+              "order": 1,
+              "dataTransformation": {
+                "input": "Path parameter 'id', Request headers (cookies)",
+                "output": "User object (JSON)",
+                "description": "Extracts userId from 'token' cookie, verifies user's 'admin' role, then fetches the specific user by ID from the database and removes the password field before responding."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.id, adminId))",
+              "order": 2,
+              "dataTransformation": {
+                "input": "adminId (from cookie)",
+                "output": "adminUser (user record)",
+                "description": "Fetches admin user details to verify admin role."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.id, userId))",
+              "order": 3,
+              "dataTransformation": {
+                "input": "userId (from path params)",
+                "output": "user record",
+                "description": "Fetches the requested user's details."
+              }
+            },
+            {
+              "componentId": "route-handler-admin-users-id-get",
+              "functionName": "GET (password removal)",
+              "order": 4,
+              "dataTransformation": {
+                "input": "User record",
+                "output": "User record with `password` field removed.",
+                "description": "Removes the password field from the user object before sending the response."
+              }
+            }
+          ]
+        },
+        {
+          "id": "admin-users-id-patch",
+          "path": "/api/admin/users/{id}",
+          "method": "PATCH",
+          "handler": "PATCH",
+          "examplePayload": {
+            "role": "seller"
+          },
+          "flowSteps": [
+            {
+              "componentId": "nextjs-middleware",
+              "functionName": "middleware",
+              "order": 0,
+              "dataTransformation": {
+                "input": "NextRequest (contains cookies)",
+                "output": "NextResponse or redirection",
+                "description": "Checks if the path is an admin route and if a 'token' cookie exists. Redirects to /auth/login if not authenticated. This API route itself handles further admin role verification."
+              }
+            },
+            {
+              "componentId": "route-handler-admin-users-id-patch",
+              "functionName": "PATCH",
+              "order": 1,
+              "dataTransformation": {
+                "input": "Path parameter 'id', Request headers (cookies), Request body (JSON)",
+                "output": "Updated user object (JSON)",
+                "description": "Extracts userId from 'token' cookie, verifies user's 'admin' role, parses the request body for allowed fields (e.g., 'role'), updates the user in the database, and returns the updated user details (excluding password)."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.id, adminId))",
+              "order": 2,
+              "dataTransformation": {
+                "input": "adminId (from cookie)",
+                "output": "adminUser (user record)",
+                "description": "Fetches admin user details to verify admin role."
+              }
+            },
+            {
+              "componentId": "route-handler-admin-users-id-patch",
+              "functionName": "PATCH (body parsing)",
+              "order": 3,
+              "dataTransformation": {
+                "input": "Raw request body",
+                "output": "{ role: string }",
+                "description": "Parses request body JSON and filters for allowed update fields (e.g., 'role')."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.update(users).set({...}).where(eq(users.id, userId))",
+              "order": 4,
+              "dataTransformation": {
+                "input": "userId (from path params), updateData (from body)",
+                "output": "Database update successful",
+                "description": "Updates the user record in the database."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.id, userId))",
+              "order": 5,
+              "dataTransformation": {
+                "input": "userId (from path params)",
+                "output": "updatedUser (user record)",
+                "description": "Fetches the newly updated user's details."
+              }
+            },
+            {
+              "componentId": "route-handler-admin-users-id-patch",
+              "functionName": "PATCH (password removal)",
+              "order": 6,
+              "dataTransformation": {
+                "input": "Updated user record",
+                "output": "Updated user record with `password` field removed.",
+                "description": "Removes the password field from the user object before sending the response."
+              }
+            }
+          ]
+        },
+        {
+          "id": "admin-verify-get",
+          "path": "/api/admin/verify",
+          "method": "GET",
+          "handler": "GET",
+          "examplePayload": null,
+          "flowSteps": [
+            {
+              "componentId": "nextjs-middleware",
+              "functionName": "middleware",
+              "order": 0,
+              "dataTransformation": {
+                "input": "NextRequest (contains cookies)",
+                "output": "NextResponse or redirection",
+                "description": "Checks if the path is an admin route and if a 'token' cookie exists. If called by UI middleware, the token is already verified for existence, this API route confirms admin role."
+              }
+            },
+            {
+              "componentId": "route-handler-admin-verify-get",
+              "functionName": "GET",
+              "order": 1,
+              "dataTransformation": {
+                "input": "Request headers (cookies)",
+                "output": "Verification status with limited user details (JSON)",
+                "description": "Extracts userId from 'token' cookie, verifies user's existence and 'admin' role in the database. Returns success and basic user details if verification passes."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.id, userId))",
+              "order": 2,
+              "dataTransformation": {
+                "input": "userId (from cookie)",
+                "output": "userResult (user record)",
+                "description": "Fetches user details to verify admin role."
+              }
+            }
+          ]
+        },
+        {
+          "id": "auth-forgot-password-post",
+          "path": "/api/auth/forgot-password",
+          "method": "POST",
+          "handler": "POST",
+          "examplePayload": {
+            "email": "test@example.com"
+          },
+          "flowSteps": [
+            {
+              "componentId": "route-handler-auth-forgot-password-post",
+              "functionName": "POST",
+              "order": 0,
+              "dataTransformation": {
+                "input": "Request body (JSON: email)",
+                "output": "Message indicating OTP sent (JSON)",
+                "description": "Parses email from request body, checks if user exists, generates an OTP, stores it in `otpStore` with an expiration, and sends the OTP to the user's email via Nodemailer."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.email, email))",
+              "order": 1,
+              "dataTransformation": {
+                "input": "email (from request body)",
+                "output": "existingUser (user record)",
+                "description": "Checks if a user with the provided email exists in the database."
+              }
+            },
+            {
+              "componentId": "generateOTP",
+              "functionName": "generateOTP",
+              "order": 2,
+              "dataTransformation": {
+                "input": "N/A",
+                "output": "string (6-digit OTP)",
+                "description": "Generates a random 6-digit OTP."
+              }
+            },
+            {
+              "componentId": "otp-store",
+              "functionName": "store OTP",
+              "order": 3,
+              "dataTransformation": {
+                "input": "email, otp, expiration timestamp",
+                "output": "OTP stored in memory",
+                "description": "Stores the generated OTP in an in-memory store associated with the user's email, with a 15-minute expiration."
+              }
+            },
+            {
+              "componentId": "nodemailer-transporter",
+              "functionName": "transporter.sendMail",
+              "order": 4,
+              "dataTransformation": {
+                "input": "mailOptions (from, to, subject, html body with OTP)",
+                "output": "Email sent status",
+                "description": "Sends an email containing the OTP to the user."
+              }
+            }
+          ]
+        },
+        {
+          "id": "auth-login-post",
+          "path": "/api/auth/login",
+          "method": "POST",
+          "handler": "POST",
+          "examplePayload": {
+            "email": "test@example.com",
+            "password": "SecurePassword123"
+          },
+          "flowSteps": [
+            {
+              "componentId": "route-handler-auth-login-post",
+              "functionName": "POST",
+              "order": 0,
+              "dataTransformation": {
+                "input": "Request body (JSON: email, password)",
+                "output": "Login success message and user role (JSON), auth token cookie",
+                "description": "Parses email and password from request body, checks if user exists, compares hashed password, and sets an authentication 'token' cookie (user ID) upon successful login."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.email, email))",
+              "order": 1,
+              "dataTransformation": {
+                "input": "email (from request body)",
+                "output": "existingUser (user record)",
+                "description": "Fetches user details by email to verify existence."
+              }
+            },
+            {
+              "componentId": "bcrypt-utility",
+              "functionName": "bcrypt.compare",
+              "order": 2,
+              "dataTransformation": {
+                "input": "password (from request body), user.password (hashed from DB)",
+                "output": "boolean (password match)",
+                "description": "Compares the provided password with the hashed password stored in the database."
+              }
+            },
+            {
+              "componentId": "nextjs-cookies",
+              "functionName": "cookies().set('token', ...)",
+              "order": 3,
+              "dataTransformation": {
+                "input": "user.id",
+                "output": "HTTP cookie 'token' set",
+                "description": "Sets a secure, HTTP-only cookie named 'token' with the user's ID, valid for 1 week."
+              }
+            }
+          ]
+        },
+        {
+          "id": "auth-logout-post",
+          "path": "/api/auth/logout",
+          "method": "POST",
+          "handler": "POST",
+          "examplePayload": {},
+          "flowSteps": [
+            {
+              "componentId": "route-handler-auth-logout-post",
+              "functionName": "POST",
+              "order": 0,
+              "dataTransformation": {
+                "input": "N/A",
+                "output": "Logout success message (JSON)",
+                "description": "Deletes the authentication 'token' cookie, effectively logging the user out."
+              }
+            },
+            {
+              "componentId": "nextjs-cookies",
+              "functionName": "cookies().delete('token')",
+              "order": 1,
+              "dataTransformation": {
+                "input": "N/A",
+                "output": "HTTP cookie 'token' deleted",
+                "description": "Deletes the 'token' cookie from the browser."
+              }
+            }
+          ]
+        },
+        {
+          "id": "auth-profile-get",
+          "path": "/api/auth/profile",
+          "method": "GET",
+          "handler": "GET",
+          "examplePayload": null,
+          "flowSteps": [
+            {
+              "componentId": "route-handler-auth-profile-get",
+              "functionName": "GET",
+              "order": 0,
+              "dataTransformation": {
+                "input": "Request headers (cookies)",
+                "output": "User profile details (JSON)",
+                "description": "Retrieves the 'token' (user ID) from cookies, fetches user details from the database, and returns a sanitized profile (excluding password)."
+              }
+            },
+            {
+              "componentId": "nextjs-cookies",
+              "functionName": "cookies().get('token')",
+              "order": 1,
+              "dataTransformation": {
+                "input": "N/A",
+                "output": "token (string userId) or undefined",
+                "description": "Retrieves the 'token' cookie."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.id, userId))",
+              "order": 2,
+              "dataTransformation": {
+                "input": "userId (from cookie)",
+                "output": "existingUser (user record)",
+                "description": "Fetches user details by ID."
+              }
+            },
+            {
+              "componentId": "route-handler-auth-profile-get",
+              "functionName": "GET (data sanitization)",
+              "order": 3,
+              "dataTransformation": {
+                "input": "Full user record",
+                "output": "Sanitized user profile (id, name, email, role)",
+                "description": "Selects specific, non-sensitive fields to form the public user profile."
+              }
+            }
+          ]
+        },
+        {
+          "id": "auth-register-post",
+          "path": "/api/auth/register",
+          "method": "POST",
+          "handler": "POST",
+          "examplePayload": {
+            "title": "Mr.",
+            "firstName": "John",
+            "surname": "Doe",
+            "mobile": "9876543210",
+            "email": "john.doe@example.com",
+            "password": "StrongPassword123!",
+            "addressLine1": "123 Main St",
+            "addressLine2": "Apt 4B",
+            "city": "Anytown",
+            "state": "Anystate",
+            "pincode": "123456",
+            "termsAccepted": true
+          },
+          "flowSteps": [
+            {
+              "componentId": "route-handler-auth-register-post",
+              "functionName": "POST",
+              "order": 0,
+              "dataTransformation": {
+                "input": "Request body (JSON)",
+                "output": "Registration success message and reference ID (JSON), auth token cookie",
+                "description": "Parses and validates registration data using Zod, checks for existing email, verifies optional referral code, hashes password, generates unique reference ID, inserts new user into DB, creates referral record if applicable, and sets an authentication 'token' cookie (user ID)."
+              }
+            },
+            {
+              "componentId": "zod-validation",
+              "functionName": "registerSchema.parse",
+              "order": 1,
+              "dataTransformation": {
+                "input": "Raw request body",
+                "output": "Validated and typed user registration data",
+                "description": "Validates the incoming request body against the predefined `registerSchema`."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.email, email))",
+              "order": 2,
+              "dataTransformation": {
+                "input": "validatedData.email",
+                "output": "existingUser (user id record)",
+                "description": "Checks if an account with the provided email already exists."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.select().from(users).where(eq(users.referenceId, referralCode))",
+              "order": 3,
+              "dataTransformation": {
+                "input": "validatedData.referralCode",
+                "output": "referrer (user id record)",
+                "description": "Verifies if the provided referral code belongs to an existing user."
+              }
+            },
+            {
+              "componentId": "bcrypt-utility",
+              "functionName": "hash",
+              "order": 4,
+              "dataTransformation": {
+                "input": "validatedData.password",
+                "output": "hashedPassword (string)",
+                "description": "Hashes the user's plain-text password using bcrypt."
+              }
+            },
+            {
+              "componentId": "route-handler-auth-register-post",
+              "functionName": "Math.floor(100000 + Math.random() * 900000).toString()",
+              "order": 5,
+              "dataTransformation": {
+                "input": "N/A",
+                "output": "referenceId (6-digit string)",
+                "description": "Generates a unique 6-digit reference ID for the new user."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.insert(users).values({...}).returning({...})",
+              "order": 6,
+              "dataTransformation": {
+                "input": "Validated user data, hashedPassword, generated referenceId",
+                "output": "newUser (id, referenceId of created user)",
+                "description": "Inserts the new user's details into the 'users' table."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.insert(referrals).values({...}).returning({...})",
+              "order": 7,
+              "dataTransformation": {
+                "input": "referrerId, newUser.id",
+                "output": "referral (id of created referral record)",
+                "description": "Creates a referral record if a valid referral code was provided."
+              }
+            },
+            {
+              "componentId": "nextjs-cookies",
+              "functionName": "cookies().set('token', ...)",
+              "order": 8,
+              "dataTransformation": {
+                "input": "newUser[0].id",
+                "output": "HTTP cookie 'token' set",
+                "description": "Sets an authentication 'token' cookie (user ID) for the newly registered user."
+              }
+            }
+          ]
+        },
+        {
+          "id": "auth-reset-password-post",
+          "path": "/api/auth/reset-password",
+          "method": "POST",
+          "handler": "POST",
+          "examplePayload": {
+            "email": "test@example.com",
+            "otp": "123456",
+            "newPassword": "NewSecurePassword123!"
+          },
+          "flowSteps": [
+            {
+              "componentId": "route-handler-auth-reset-password-post",
+              "functionName": "POST",
+              "order": 0,
+              "dataTransformation": {
+                "input": "Request body (JSON: email, otp, newPassword)",
+                "output": "Password reset success message (JSON)",
+                "description": "Parses email, OTP, and new password from request body. Verifies the OTP against the `otpStore` (checking validity and expiration). Hashes the new password and updates the user's password in the database. Deletes the OTP from storage."
+              }
+            },
+            {
+              "componentId": "otp-store",
+              "functionName": "retrieve and verify OTP",
+              "order": 1,
+              "dataTransformation": {
+                "input": "email, otp (from request body)",
+                "output": "boolean (OTP valid and not expired)",
+                "description": "Retrieves the OTP record for the email and verifies if the provided OTP matches and is not expired."
+              }
+            },
+            {
+              "componentId": "bcrypt-utility",
+              "functionName": "hash",
+              "order": 2,
+              "dataTransformation": {
+                "input": "newPassword (from request body)",
+                "output": "hashedPassword (string)",
+                "description": "Hashes the new password using bcrypt."
+              }
+            },
+            {
+              "componentId": "drizzle-db-repository",
+              "functionName": "db.update(users).set({...}).where(eq(users.email, email))",
+              "order": 3,
+              "dataTransformation": {
+                "input": "email (from request body), hashedPassword",
+                "output": "Database update successful",
+                "description": "Updates the user's password in the 'users' table."
+              }
+            },
+            {
+              "componentId": "otp-store",
+              "functionName": "delete OTP",
+              "order": 4,
+              "dataTransformation": {
+                "input": "email",
+                "output": "OTP record removed from memory",
+                "description": "Deletes the OTP record from the in-memory store after successful password reset."
+              }
+            }
+          ]
+        },
+        {
+          "id": "auth-verify-otp-post",
+          "path": "/api/auth/verify-otp",
+          "method": "POST",
+          "handler": "POST",
+          "examplePayload": {
+            "email": "test@example.com",
+            "otp": "123456"
+          },
+          "flowSteps": [
+            {
+              "componentId": "route-handler-auth-verify-otp-post",
+              "functionName": "POST",
+              "order": 0,
+              "dataTransformation": {
+                "input": "Request body (JSON: email, otp)",
+                "output": "OTP verification status message (JSON)",
+                "description": "Parses email and OTP from request body. Checks the `otpStore` to verify if the provided OTP matches the stored one for the email and if it has not expired."
+              }
+            },
+            {
+              "componentId": "otp-store",
+              "functionName": "retrieve and verify OTP",
+              "order": 1,
+              "dataTransformation": {
+                "input": "email, otp (from request body)",
+                "output": "boolean (OTP valid and not expired)",
+                "description": "Retrieves the OTP record for the email and verifies if the provided OTP matches and is not expired."
+              }
+            }
+          ]
+        }
+      ],
+      "internalComponents": [
+        {
+          "id": "drizzle-db-repository",
+          "name": "Drizzle ORM Database",
+          "type": "repository",
+          "filePath": "configs/db.js",
+          "functions": [
+            {
+              "name": "db.select",
+              "params": [
+                "..."
+              ],
+              "returns": "Promise<Array<Object>>",
+              "transformsData": false
+            },
+            {
+              "name": "db.insert",
+              "params": [
+                "table",
+                "values"
+              ],
+              "returns": "Promise<Array<Object>> (returning inserted IDs/fields)",
+              "transformsData": false
+            },
+            {
+              "name": "db.update",
+              "params": [
+                "table",
+                "set",
+                "where"
+              ],
+              "returns": "Promise<void>",
+              "transformsData": false
+            }
+          ]
+        },
+        {
+          "id": "drizzle-schema-definitions",
+          "name": "Database Schema Definitions",
+          "type": "schema",
+          "filePath": "configs/schema.js",
+          "functions": [
+            {
+              "name": "users",
+              "params": [],
+              "returns": "PgTable",
+              "transformsData": false
+            },
+            {
+              "name": "products",
+              "params": [],
+              "returns": "PgTable",
+              "transformsData": false
+            },
+            {
+              "name": "orders",
+              "params": [],
+              "returns": "PgTable",
+              "transformsData": false
+            },
+            {
+              "name": "payments",
+              "params": [],
+              "returns": "PgTable",
+              "transformsData": false
+            },
+            {
+              "name": "referrals",
+              "params": [],
+              "returns": "PgTable",
+              "transformsData": false
+            },
+            {
+              "name": "bankDetails",
+              "params": [],
+              "returns": "PgTable",
+              "transformsData": false
+            }
+          ]
+        },
+        {
+          "id": "nextjs-middleware",
+          "name": "Next.js Middleware",
+          "type": "middleware",
+          "filePath": "src/middleware.ts",
+          "functions": [
+            {
+              "name": "middleware",
+              "params": [
+                "req: NextRequest"
+              ],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "otp-store",
+          "name": "In-Memory OTP Store",
+          "type": "store",
+          "filePath": "src/app/api/auth/forgot-password/route.ts (globalThis)",
+          "functions": [
+            {
+              "name": "store OTP",
+              "params": [
+                "email: string",
+                "{ otp: string, expires: number }"
+              ],
+              "returns": "void",
+              "transformsData": false
+            },
+            {
+              "name": "retrieve OTP",
+              "params": [
+                "email: string"
+              ],
+              "returns": "{ otp: string, expires: number } | undefined",
+              "transformsData": false
+            },
+            {
+              "name": "delete OTP",
+              "params": [
+                "email: string"
+              ],
+              "returns": "void",
+              "transformsData": false
+            }
+          ]
+        },
+        {
+          "id": "generateOTP",
+          "name": "OTP Generation Utility",
+          "type": "util",
+          "filePath": "src/app/api/auth/forgot-password/route.ts",
+          "functions": [
+            {
+              "name": "generateOTP",
+              "params": [],
+              "returns": "string (6-digit number)",
+              "transformsData": false
+            }
+          ]
+        },
+        {
+          "id": "nodemailer-transporter",
+          "name": "Nodemailer Email Transporter",
+          "type": "external-client",
+          "filePath": "src/app/api/auth/forgot-password/route.ts",
+          "functions": [
+            {
+              "name": "transporter.sendMail",
+              "params": [
+                "mailOptions: Object"
+              ],
+              "returns": "Promise<Object> (info about email sent)",
+              "transformsData": false
+            }
+          ]
+        },
+        {
+          "id": "bcrypt-utility",
+          "name": "Bcrypt.js Hashing Utility",
+          "type": "util",
+          "filePath": "src/app/api/auth/login/route.ts, src/app/api/auth/register/route.ts, src/app/api/auth/reset-password/route.ts",
+          "functions": [
+            {
+              "name": "hash",
+              "params": [
+                "password: string",
+                "saltRounds: number"
+              ],
+              "returns": "Promise<string> (hashed password)",
+              "transformsData": true
+            },
+            {
+              "name": "compare",
+              "params": [
+                "password: string",
+                "hash: string"
+              ],
+              "returns": "Promise<boolean>",
+              "transformsData": false
+            }
+          ]
+        },
+        {
+          "id": "zod-validation",
+          "name": "Zod Schema Validation",
+          "type": "util",
+          "filePath": "src/app/api/auth/register/route.ts",
+          "functions": [
+            {
+              "name": "registerSchema.parse",
+              "params": [
+                "data: any"
+              ],
+              "returns": "Object (validated data)",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "nextjs-cookies",
+          "name": "Next.js Cookies API",
+          "type": "util",
+          "filePath": "Multiple API routes",
+          "functions": [
+            {
+              "name": "cookies().get",
+              "params": [
+                "name: string"
+              ],
+              "returns": "Cookie | undefined",
+              "transformsData": false
+            },
+            {
+              "name": "cookies().set",
+              "params": [
+                "name: string",
+                "value: string",
+                "options: CookieOptions"
+              ],
+              "returns": "void",
+              "transformsData": false
+            },
+            {
+              "name": "cookies().delete",
+              "params": [
+                "name: string"
+              ],
+              "returns": "void",
+              "transformsData": false
+            }
+          ]
+        },
+        {
+          "id": "route-handler-admin-dashboard-get",
+          "name": "Admin Dashboard GET Handler",
+          "type": "handler",
+          "filePath": "src/app/api/admin/dashboard/route.ts",
+          "functions": [
+            {
+              "name": "GET",
+              "params": [],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "route-handler-admin-orders-get",
+          "name": "Admin Orders GET Handler",
+          "type": "handler",
+          "filePath": "src/app/api/admin/orders/route.ts",
+          "functions": [
+            {
+              "name": "GET",
+              "params": [
+                "request: Request"
+              ],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "route-handler-admin-products-get",
+          "name": "Admin Products GET Handler",
+          "type": "handler",
+          "filePath": "src/app/api/admin/products/route.ts",
+          "functions": [
+            {
+              "name": "GET",
+              "params": [
+                "request: Request"
+              ],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "route-handler-admin-referrals-get",
+          "name": "Admin Referrals GET Handler",
+          "type": "handler",
+          "filePath": "src/app/api/admin/referrals/route.ts",
+          "functions": [
+            {
+              "name": "GET",
+              "params": [
+                "request: Request"
+              ],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "route-handler-admin-users-get",
+          "name": "Admin Users GET Handler",
+          "type": "handler",
+          "filePath": "src/app/api/admin/users/route.ts",
+          "functions": [
+            {
+              "name": "GET",
+              "params": [
+                "request: Request"
+              ],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "route-handler-admin-users-id-get",
+          "name": "Admin User By ID GET Handler",
+          "type": "handler",
+          "filePath": "src/app/api/admin/users/[id]/route.js",
+          "functions": [
+            {
+              "name": "GET",
+              "params": [
+                "_: any",
+                "{ params: { id: string } }"
+              ],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "route-handler-admin-users-id-patch",
+          "name": "Admin User By ID PATCH Handler",
+          "type": "handler",
+          "filePath": "src/app/api/admin/users/[id]/route.js",
+          "functions": [
+            {
+              "name": "PATCH",
+              "params": [
+                "request: Request",
+                "{ params: { id: string } }"
+              ],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "route-handler-admin-verify-get",
+          "name": "Admin Verify GET Handler",
+          "type": "handler",
+          "filePath": "src/app/api/admin/verify/route.ts",
+          "functions": [
+            {
+              "name": "GET",
+              "params": [],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "route-handler-auth-forgot-password-post",
+          "name": "Auth Forgot Password POST Handler",
+          "type": "handler",
+          "filePath": "src/app/api/auth/forgot-password/route.ts",
+          "functions": [
+            {
+              "name": "POST",
+              "params": [
+                "req: Request"
+              ],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "route-handler-auth-login-post",
+          "name": "Auth Login POST Handler",
+          "type": "handler",
+          "filePath": "src/app/api/auth/login/route.ts",
+          "functions": [
+            {
+              "name": "POST",
+              "params": [
+                "req: Request"
+              ],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "route-handler-auth-logout-post",
+          "name": "Auth Logout POST Handler",
+          "type": "handler",
+          "filePath": "src/app/api/auth/logout/route.ts",
+          "functions": [
+            {
+              "name": "POST",
+              "params": [],
+              "returns": "NextResponse",
+              "transformsData": false
+            }
+          ]
+        },
+        {
+          "id": "route-handler-auth-profile-get",
+          "name": "Auth Profile GET Handler",
+          "type": "handler",
+          "filePath": "src/app/api/auth/profile/route.ts",
+          "functions": [
+            {
+              "name": "GET",
+              "params": [],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "route-handler-auth-register-post",
+          "name": "Auth Register POST Handler",
+          "type": "handler",
+          "filePath": "src/app/api/auth/register/route.ts",
+          "functions": [
+            {
+              "name": "POST",
+              "params": [
+                "request: Request"
+              ],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "route-handler-auth-reset-password-post",
+          "name": "Auth Reset Password POST Handler",
+          "type": "handler",
+          "filePath": "src/app/api/auth/reset-password/route.ts",
+          "functions": [
+            {
+              "name": "POST",
+              "params": [
+                "req: Request"
+              ],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        },
+        {
+          "id": "route-handler-auth-verify-otp-post",
+          "name": "Auth Verify OTP POST Handler",
+          "type": "handler",
+          "filePath": "src/app/api/auth/verify-otp/route.ts",
+          "functions": [
+            {
+              "name": "POST",
+              "params": [
+                "req: Request"
+              ],
+              "returns": "NextResponse",
+              "transformsData": true
+            }
+          ]
+        }
+      ],
+      "externalCalls": [
+        {
+          "from": "nextjs-middleware",
+          "to": "nextjs-api-server",
+          "method": "GET",
+          "endpoint": "/api/admin/verify"
+        },
+        {
+          "from": "nodemailer-transporter",
+          "to": "email-smtp-service",
+          "method": "POST",
+          "endpoint": "smtp.gmail.com"
+        }
+      ],
+      "baseUrl": "https://nav-shristi.vercel.app/"
+    }
+  ],
+  "externalServices": [
+    {
+      "id": "postgresql-db",
+      "name": "PostgreSQL Database",
+      "baseUrl": "process.env.NEXT_PUBLIC_DATABASE_CONNECTION_STRING"
+    },
+    {
+      "id": "email-smtp-service",
+      "name": "SMTP Email Service (e.g., Gmail)",
+      "baseUrl": "smtp.gmail.com"
+    }
+  ]
+}
