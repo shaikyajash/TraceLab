@@ -1,15 +1,8 @@
-import {
-  DiscoveredService,
-  PerServiceResult,
-  CrossServiceCall,
-} from "./schema";
-import { buildPerServicePrompt, buildCrossServicePrompt } from "./prompts";
-import { chat, getModelName as _getModelName } from "./llm";
-import {
-  resolveExternalTypes,
-  type ResolvedExternalType,
-} from "./external-types";
-import { validatePerServiceResult } from "./validator";
+import { DiscoveredService, PerServiceResult, CrossServiceCall } from './schema';
+import { buildPerServicePrompt, buildCrossServicePrompt } from './prompts';
+import { chat, getModelName as _getModelName } from './llm';
+import { resolveExternalTypes, type ResolvedExternalType } from './external-types';
+import { validatePerServiceResult } from './validator';
 
 export { _getModelName as getModelName };
 
@@ -27,10 +20,7 @@ function parseResult(jsonStr: string): PerServiceResult {
   };
 }
 
-function buildRepairPrompt(
-  result: PerServiceResult,
-  repairInstructions: string,
-): string {
+function buildRepairPrompt(result: PerServiceResult, repairInstructions: string): string {
   return `The following JSON analysis has validation errors. Fix ALL of them and return the corrected FULL JSON.
 
 ERRORS TO FIX:
@@ -56,9 +46,9 @@ export async function analyzeService(
     return {
       service: {
         id: service.name,
-        kind: "service",
+        kind: 'service',
         path: service.path,
-        description: "Empty service (no .rs files found)",
+        description: 'Empty service (no .rs files found)',
       },
       nodes: [],
       edges: [],
@@ -71,16 +61,11 @@ export async function analyzeService(
   let externalTypes: ResolvedExternalType[] = [];
   if (options?.workspacePath) {
     try {
-      options.onProgress?.(
-        `Resolving external types for ${service.name}...`,
-      );
-      externalTypes = await resolveExternalTypes(
-        options.workspacePath,
-        service,
-      );
+      options.onProgress?.(`Resolving external types for ${service.name}...`);
+      externalTypes = await resolveExternalTypes(options.workspacePath, service);
       if (externalTypes.length > 0) {
         options.onProgress?.(
-          `Found ${externalTypes.length} external type(s): ${externalTypes.map((t) => t.typeName).join(", ")}`,
+          `Found ${externalTypes.length} external type(s): ${externalTypes.map((t) => t.typeName).join(', ')}`,
         );
       }
     } catch {
@@ -106,8 +91,7 @@ export async function analyzeService(
   } catch {
     // JSON was malformed — ask LLM to fix it
     const fixed = await chat({
-      system:
-        "Fix the following invalid JSON. Return ONLY valid JSON, nothing else.",
+      system: 'Fix the following invalid JSON. Return ONLY valid JSON, nothing else.',
       user: jsonStr,
     });
     result = parseResult(fixed);
@@ -120,9 +104,7 @@ export async function analyzeService(
 
     if (validation.valid) {
       if (attempt === 0 && validation.errors.length > 0) {
-        options?.onProgress?.(
-          `Validation passed with ${validation.errors.length} warning(s)`,
-        );
+        options?.onProgress?.(`Validation passed with ${validation.errors.length} warning(s)`);
       }
       break;
     }
@@ -134,7 +116,7 @@ export async function analyzeService(
     try {
       const repairStr = await chat({
         system:
-          "You are fixing a JSON analysis that has validation errors. Return ONLY the corrected full JSON. No prose, no markdown fences.",
+          'You are fixing a JSON analysis that has validation errors. Return ONLY the corrected full JSON. No prose, no markdown fences.',
         user: buildRepairPrompt(result, validation.repairInstructions),
       });
       result = parseResult(repairStr);

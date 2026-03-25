@@ -1,12 +1,13 @@
-import { NextRequest } from "next/server";
-import { SimulationEvent, SimulationRequest } from "@/lib/schema";
-import { simulateNode } from "@/lib/simulation";
-import { setProvider, type LLMProvider } from "@/lib/llm";
-import { selectTrace, collectTypeContext } from "@/lib/trace-selector";
-import type { TraceStepContext } from "@/lib/simulation-prompts";
+import { NextRequest } from 'next/server';
+import { SimulationEvent, SimulationRequest } from '@/lib/schema';
+import { simulateNode } from '@/lib/simulation';
+import { setProvider, type LLMProvider } from '@/lib/llm';
+import { resolveTrace } from '@/lib/trace-resolver';
+import { collectTypeContext } from '@/lib/trace-selector';
+import type { TraceStepContext } from '@/lib/simulation-prompts';
 
 function encode(event: SimulationEvent): string {
-  return JSON.stringify(event) + "\n";
+  return JSON.stringify(event) + '\n';
 }
 
 export async function POST(request: NextRequest) {
@@ -14,18 +15,16 @@ export async function POST(request: NextRequest) {
   const { graph, start_node_id, initial_payload, breakpoints, provider } =
     body as SimulationRequest & { provider?: string };
 
-  if (provider === "claude" || provider === "gemini" || provider === "openai") {
+  if (provider === 'claude' || provider === 'gemini' || provider === 'openai') {
     setProvider(provider as LLMProvider);
   }
 
   const nodeMap = new Map(graph.nodes.map((n) => [n.id, n]));
 
-  // ── Try trace-aware simulation first ──
-  const selectedTrace = await selectTrace(
-    graph,
-    start_node_id,
-    initial_payload,
-  );
+  // ── Deterministic trace resolution (no AI needed) ──
+  const resolved = resolveTrace(graph, start_node_id, initial_payload);
+  const selectedTrace = resolved?.trace ?? null;
+  const resolvedSteps = resolved?.steps ?? [];
 
   const typeContext = collectTypeContext(graph.nodes);
 
@@ -45,36 +44,33 @@ export async function POST(request: NextRequest) {
 
           // Send trace selection info as first event
           send({
-            type: "step",
+            type: 'step',
             step: {
-              node_id: "__trace_selected__",
-              node_name: "Trace Selected",
-              node_kind: "function",
-              service: "",
+              node_id: '__trace_selected__',
+              node_name: 'Trace Selected',
+              node_kind: 'function',
+              service: '',
               input_payload: initial_payload,
               output_payload: initial_payload,
               explanation: `Selected trace: "${selectedTrace.label}" — ${selectedTrace.description}`,
-              diff_summary: `Matched trace with ${selectedTrace.steps.length} steps`,
+              diff_summary: `Matched trace with ${resolvedSteps.length} steps`,
             },
           });
 
-          for (let i = 0; i < selectedTrace.steps.length; i++) {
-            const traceStep = selectedTrace.steps[i];
+          for (let i = 0; i < resolvedSteps.length; i++) {
+            const traceStep = resolvedSteps[i];
             const node = nodeMap.get(traceStep.node_id);
             if (!node) continue;
 
             // Check breakpoint BEFORE simulating
-            if (
-              breakpoints.includes(node.id) &&
-              node.id !== start_node_id
-            ) {
+            if (breakpoints.includes(node.id) && node.id !== start_node_id) {
               send({
-                type: "breakpoint",
+                type: 'breakpoint',
                 node_id: node.id,
                 message: `Breakpoint hit at ${node.name}`,
               });
               send({
-                type: "step",
+                type: 'step',
                 step: {
                   node_id: node.id,
                   node_name: node.name,
@@ -83,8 +79,8 @@ export async function POST(request: NextRequest) {
                   input_payload: currentPayload,
                   output_payload: currentPayload,
                   explanation:
-                    "Paused at breakpoint — payload has not been processed by this component yet.",
-                  diff_summary: "No changes (breakpoint)",
+                    'Paused at breakpoint — payload has not been processed by this component yet.',
+                  diff_summary: 'No changes (breakpoint)',
                 },
               });
               controller.close();
@@ -98,15 +94,11 @@ export async function POST(request: NextRequest) {
               edgeLabel: traceStep.edge_label,
               typeContext,
               stepIndex: i,
-              totalSteps: selectedTrace.steps.length,
+              totalSteps: resolvedSteps.length,
             };
 
-            const step = await simulateNode(
-              node,
-              currentPayload,
-              traceContext,
-            );
-            send({ type: "step", step });
+            const step = await simulateNode(node, currentPayload, traceContext);
+            send({ type: 'step', step });
             currentPayload = step.output_payload;
           }
         } else {
@@ -138,17 +130,14 @@ export async function POST(request: NextRequest) {
             const node = nodeMap.get(nodeId);
             if (!node) continue;
 
-            if (
-              breakpoints.includes(nodeId) &&
-              nodeId !== start_node_id
-            ) {
+            if (breakpoints.includes(nodeId) && nodeId !== start_node_id) {
               send({
-                type: "breakpoint",
+                type: 'breakpoint',
                 node_id: nodeId,
                 message: `Breakpoint hit at ${node.name}`,
               });
               send({
-                type: "step",
+                type: 'step',
                 step: {
                   node_id: nodeId,
                   node_name: node.name,
@@ -157,8 +146,8 @@ export async function POST(request: NextRequest) {
                   input_payload: currentPayload,
                   output_payload: currentPayload,
                   explanation:
-                    "Paused at breakpoint — payload has not been processed by this component yet.",
-                  diff_summary: "No changes (breakpoint)",
+                    'Paused at breakpoint — payload has not been processed by this component yet.',
+                  diff_summary: 'No changes (breakpoint)',
                 },
               });
               controller.close();
@@ -166,16 +155,15 @@ export async function POST(request: NextRequest) {
             }
 
             const step = await simulateNode(node, currentPayload);
-            send({ type: "step", step });
+            send({ type: 'step', step });
             currentPayload = step.output_payload;
           }
         }
 
-        send({ type: "complete", message: "Simulation complete" });
+        send({ type: 'complete', message: 'Simulation complete' });
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Simulation error";
-        send({ type: "error", message });
+        const message = err instanceof Error ? err.message : 'Simulation error';
+        send({ type: 'error', message });
       } finally {
         controller.close();
       }
@@ -184,9 +172,9 @@ export async function POST(request: NextRequest) {
 
   return new Response(stream, {
     headers: {
-      "Content-Type": "application/x-ndjson",
-      "Cache-Control": "no-cache",
-      Connection: "keep-alive",
+      'Content-Type': 'application/x-ndjson',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
     },
   });
 }

@@ -1,8 +1,5 @@
-import { DiscoveredService } from "./schema";
-import {
-  type ResolvedExternalType,
-  formatExternalTypesForPrompt,
-} from "./external-types";
+import { DiscoveredService } from './schema';
+import { type ResolvedExternalType, formatExternalTypesForPrompt } from './external-types';
 
 export function buildPerServicePrompt(
   service: DiscoveredService,
@@ -12,14 +9,12 @@ export function buildPerServicePrompt(
   user: string;
 } {
   const fileList = service.rsFiles
-    .map(
-      (f) => `--- FILE: ${f.relativePath} ---\n${f.content}\n--- END FILE ---`,
-    )
-    .join("\n\n");
+    .map((f) => `--- FILE: ${f.relativePath} ---\n${f.content}\n--- END FILE ---`)
+    .join('\n\n');
 
   const externalTypesContext = externalTypes?.length
     ? formatExternalTypesForPrompt(externalTypes)
-    : "";
+    : '';
 
   const system = `You are a senior Rust code analyzer that produces structured JSON describing a service's architecture, data flow, and execution paths.
 
@@ -43,7 +38,7 @@ Extract every meaningful component. A "component" is any unit where data enters,
   function         — utility functions that don't fit above
 
 For each node, provide:
-  id            — unique, stable identifier (for route_handlers use "METHOD /path" e.g. "POST /credentials/{secret}")
+  id            — unique, stable identifier (for route_handlers use "METHOD /path" e.g. "POST /api/items/{id}")
   service       — the service name
   kind          — one of the kinds above
   name          — short human-readable name
@@ -62,12 +57,22 @@ For each node, provide:
 SECTION 2: DATA FLOW (edges)
 ═══════════════════════════════════════════
 
-For every call relationship between components, create an edge:
+For every CALL relationship between components, create an edge:
   from / to          — node ids
   payload            — describe what data flows across this edge (type, shape, key fields)
   from_service / to_service — service names
 
-Include ALL edges, including conditional ones. If component A calls B only sometimes (e.g. based on a match arm), still include the edge — the traces section will clarify which paths use which edges.
+CRITICAL EDGE RULES:
+- Edges represent CALL/INVOCATION relationships ONLY: "A calls B", "A dispatches to B", "A delegates to B".
+- Edges are NOT sequential execution order. Do NOT create edges like "validate_input → process_data"
+  just because they happen to run one after another inside the same parent function.
+  The parent (e.g. handle_request) should have edges to BOTH validate_input and process_data.
+- Edges MUST form a DAG (directed acyclic graph). Cycles are FORBIDDEN.
+  If function A calls B, and later function C also calls B, that's two edges INTO B — not a cycle.
+  But if A→B→C→A exists, that IS a cycle and is wrong.
+- Include ALL call edges, including conditional ones. If component A calls B only sometimes
+  (e.g. based on a match arm), still include the edge — traces clarify which paths use which edges.
+- Execution order within a function is captured by the trace steps array, NOT by edges.
 
 ═══════════════════════════════════════════
 SECTION 3: MUTATIONS
@@ -90,7 +95,7 @@ SECTION 4.5: SERDE AWARENESS (critical for JSON correctness)
 Rust's serde determines how types serialize/deserialize to JSON. You MUST follow these rules:
 
 RENAME RULES:
-- #[serde(rename_all = "lowercase")] → JSON values are all-lowercase: "bitcoin" not "Bitcoin"
+- #[serde(rename_all = "lowercase")] → JSON values are all-lowercase: "pending" not "Pending"
 - #[serde(rename_all = "UPPERCASE")] → JSON values are all-uppercase
 - #[serde(rename_all = "camelCase")] → JSON values are camelCase
 - #[serde(rename_all = "snake_case")] → JSON values are snake_case
@@ -111,7 +116,7 @@ ENUM NODES:
 
 EXAMPLE PAYLOADS:
 - All enum values in example_payload fields MUST use the serde-serialized form.
-  e.g. if ChainType has #[serde(rename_all = "lowercase")], use "bitcoin" not "Bitcoin".
+  e.g. if Status has #[serde(rename_all = "lowercase")], use "pending" not "Pending".
 - NEVER guess enum variants. Use only variants from the actual source code or external type definitions.
 
 ═══════════════════════════════════════════
@@ -134,36 +139,59 @@ COMMON BRANCHING PATTERNS TO DETECT:
 - Option<T> / Result<T> checks that skip processing when None/Err → shorter trace
 - Type-dependent dispatch (e.g. different serializers for different content types)
 - Feature flags or config-driven branches
-- Chain/network type dispatch (e.g. Bitcoin vs EVM vs Zcash use different key derivation)
+- Type/variant dispatch (e.g. different serializers, key derivers, or processors per enum variant)
 - Batch vs single-item processing paths
 - Cached vs uncached paths (cache hit skips computation)
 - Auth role dispatch (admin vs user vs anonymous see different flows)
 
 For each trace:
   route_id        — the route_handler node id
-  label           — human-readable name including the branch variant, e.g. "Generate (UTXO chains)" not just "Generate"
-  description     — one-line explaining what this specific path does end-to-end AND how it differs from other paths for the same route
-  example_payload — minimal JSON that triggers this path. Use real enum/type values for branching fields. Use "<placeholder>" for opaque data (hashes, tokens, IDs).
-  steps           — ordered array of { node_id, edge_label, summary }:
+  label           — human-readable name, e.g. "Create Item" or "List Items (paginated)"
+  description     — one-line explaining what this trace does
+  example_payload — a JSON that triggers this path (with real serde values)
+  match           — (optional) array of conditions; ALL must be true for this trace to apply at runtime
+  steps           — ordered array of { node_id, edge_label, summary, when? }:
     - node_id: the component visited
     - edge_label: the data flowing in (empty string for the first step)
-    - summary: what happens here AND why this branch was taken. Include the condition evaluation.
-      GOOD: "EVM chains don't require private keys → needs_private_key=false, skips keypair generation"
-      BAD:  "Checks if private key is needed"
+    - summary: what happens here AND why. Include condition evaluations.
+    - when: (optional) condition — step is INCLUDED only when true. Use for branching.
+
+CONDITION FORMAT (used in both "match" and "when"):
+  { "field": "action", "op": "eq", "value": "create" }              — field equals value
+  { "field": "role", "op": "in", "value": ["admin","editor"] }      — field is one of values
+  { "field": "role", "op": "not_in", "value": ["admin"] }           — field is NOT in values
+  { "field": "token", "op": "exists" }                              — field is present
+  { "field": "source", "op": "eq_field", "value": "destination" }   — two fields are equal
+  Ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field
+
+PARAMETRIC TRACES (critical — avoid combinatorial explosion):
+DO NOT create one trace per enum variant combination. Instead, create ONE trace with conditional steps.
+
+Example: if a function dispatches to different processors based on an enum field "format":
+  { "node_id": "process_json", "when": {"field":"format","op":"eq","value":"json"}, ... }
+  { "node_id": "process_xml",  "when": {"field":"format","op":"eq","value":"xml"}, ... }
+  { "node_id": "process_csv",  "when": {"field":"format","op":"eq","value":"csv"}, ... }
+At runtime, steps where "when" is false are SKIPPED. This single trace handles ALL format variants.
+
+For "match" on the trace itself, use conditions to gate when the trace applies:
+  "match": [{"field":"action","op":"eq","value":"create"}, {"field":"format","op":"in","value":["json","xml","csv"]}]
+  This ensures the trace only fires for valid inputs. Invalid inputs fall through to error traces.
+
+IMPORTANT: For any input field that is an enum, add a "match" condition with op:"in" listing ALL
+valid serde variant values. This prevents the trace from matching inputs with unknown/invalid values.
+Those invalid inputs should hit the catch-all error trace instead.
+
+TRACE ORDERING:
+- Most specific traces FIRST (more match conditions = higher priority).
+- Catch-all / error traces LAST (no match conditions — fire when nothing else matches).
+- Traces are tried in order; first match wins.
 
 TRACE RULES:
-- Every consecutive pair (steps[i].node_id → steps[i+1].node_id) MUST have a matching edge in the edges array.
-- If a path is shorter (skips components), the trace is shorter. That's the whole point.
-- If a path hits the SAME components but with different data, it does NOT need a separate trace (same execution path).
-- Simple endpoints with no branching (health checks, version endpoints) get exactly one trace.
-- Order traces from most common/happy path first.
-- DESERIALIZATION FAILURES: If a route_handler deserializes the request body via serde
-  (e.g. serde_json::from_value, Json<T> extractor) and the body could contain an enum field
-  with an unknown/invalid value, add a trace for "Invalid request — deserialization failure".
-  This trace is short (typically: middleware → route_handler → 400 response) because the
-  handler's match on deserialization result hits the Err(_) arm immediately.
-- WILDCARD MATCH ARMS: If the route_handler has a wildcard _ => arm (e.g. for auth/action
-  mismatch), that is a distinct trace (typically "Unauthorized — mismatch").
+- Every node_id MUST exist in the nodes array.
+- Consecutive steps do NOT need a direct edge — traces capture execution ORDER, edges capture CALL GRAPH.
+- Simple endpoints (health checks) get one trace with no match/when.
+- Deserialization failures / unknown enum values: add a catch-all trace (no match) at the END.
+- Wildcard match arms (unauthorized): add a catch-all trace at the END.
 
 ═══════════════════════════════════════════
 OUTPUT JSON SCHEMA (all fields required unless noted)
@@ -226,14 +254,24 @@ OUTPUT JSON SCHEMA (all fields required unless noted)
   "traces": [
     {
       "route_id": "the route_handler node id this trace starts from",
-      "label": "Human-readable flow name including branch variant",
-      "description": "One-line: what this path does end-to-end and how it differs from siblings",
-      "example_payload": {"action": "generate", "source_chain": "Bitcoin"},
+      "label": "Human-readable trace name",
+      "description": "One-line: what this trace does",
+      "example_payload": {"action": "create", "format": "json"},
+      "match": [
+        {"field": "action", "op": "eq", "value": "create"},
+        {"field": "format", "op": "in", "value": ["json","xml","csv"]}
+      ],
       "steps": [
         {
           "node_id": "component node_id visited at this step",
-          "edge_label": "data flowing into this step (empty string for the first step)",
-          "summary": "What happens here + why this branch was taken. Include condition evaluation."
+          "edge_label": "data flowing into this step (empty string for first step)",
+          "summary": "What happens here + why. Include condition evaluation."
+        },
+        {
+          "node_id": "process_json",
+          "edge_label": "parsed input",
+          "summary": "Processes JSON format input.",
+          "when": {"field": "format", "op": "eq", "value": "json"}
         }
       ]
     }
@@ -242,7 +280,7 @@ OUTPUT JSON SCHEMA (all fields required unless noted)
 
   const externalTypesSection = externalTypesContext
     ? `\n\n═══════════════════════════════════════════\nEXTERNAL TYPE DEFINITIONS (resolved from dependency crates)\n═══════════════════════════════════════════\n\nThe following types are used in this service but defined in external crates.\nUse these EXACT definitions for enum variants, struct fields, and serde behavior.\nDo NOT guess variants — only use what is listed here.\n\n${externalTypesContext}`
-    : "";
+    : '';
 
   const user = `Analyze the following Rust service "${service.name}" (located at "${service.path}") and extract all components, data flow edges, mutations, external packages, and execution traces.
 
@@ -289,13 +327,10 @@ Look for:
 - Direct crate dependencies between services`;
 
   const summaryText = perServiceSummaries
-    .map(
-      (s) =>
-        `Service: ${s.serviceName}\nComponents: ${JSON.stringify(s.nodes, null, 2)}`,
-    )
-    .join("\n\n---\n\n");
+    .map((s) => `Service: ${s.serviceName}\nComponents: ${JSON.stringify(s.nodes, null, 2)}`)
+    .join('\n\n---\n\n');
 
-  const user = `These are the services in the workspace: ${serviceNames.join(", ")}
+  const user = `These are the services in the workspace: ${serviceNames.join(', ')}
 
 Here are the component summaries for each service:
 

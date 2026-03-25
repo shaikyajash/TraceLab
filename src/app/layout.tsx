@@ -1,9 +1,9 @@
-import type { Metadata } from "next";
-import "./globals.css";
+import type { Metadata } from 'next';
+import './globals.css';
 
 export const metadata: Metadata = {
-  title: "TraceLab",
-  description: "Interactive graph visualizer",
+  title: 'TraceLab',
+  description: 'Interactive graph visualizer',
 };
 
 export default function RootLayout({

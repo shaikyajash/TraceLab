@@ -17,24 +17,35 @@ export interface ComponentsGraph {
   traces?: RouteTrace[];
 }
 
-/** Precomputed trace for a specific route + payload combination */
+/** Condition for matching a trace to a payload or filtering a step */
+export interface StepCondition {
+  field: string;
+  op: 'eq' | 'neq' | 'in' | 'not_in' | 'exists' | 'not_exists' | 'eq_field' | 'neq_field';
+  value?: string | string[];
+}
+
+/** Precomputed trace — may be parametric via match/when conditions */
 export interface RouteTrace {
   route_id: string;
   label: string;
   description: string;
   example_payload: Record<string, unknown>;
   steps: TraceStepDef[];
+  /** If set, ALL conditions must be true for this trace to apply. Checked in order — first match wins. */
+  match?: StepCondition[];
 }
 
 export interface TraceStepDef {
   node_id: string;
   edge_label: string;
   summary: string;
+  /** If set, this step is included only when the condition is true against the input payload */
+  when?: StepCondition;
 }
 
 export interface ServiceInfo {
   id: string;
-  kind: "service";
+  kind: 'service';
   path: string;
   description: string;
 }
@@ -43,17 +54,17 @@ export interface ComponentNode {
   id: string;
   service: string;
   kind:
-    | "route_handler"
-    | "transformer"
-    | "validator"
-    | "middleware"
-    | "business_logic"
-    | "db_call"
-    | "external_http_call"
-    | "struct"
-    | "enum"
-    | "message_queue"
-    | "function";
+    | 'route_handler'
+    | 'transformer'
+    | 'validator'
+    | 'middleware'
+    | 'business_logic'
+    | 'db_call'
+    | 'external_http_call'
+    | 'struct'
+    | 'enum'
+    | 'message_queue'
+    | 'function';
   name: string;
   input?: string;
   output?: string;
@@ -82,7 +93,7 @@ export interface PayloadEdge {
 export interface StateMutation {
   id: string;
   service: string;
-  kind: "mutation";
+  kind: 'mutation';
   mutates: string;
   via: string;
   in_component: string;
@@ -91,7 +102,7 @@ export interface StateMutation {
 
 export interface CrossServiceCall {
   id: string;
-  kind: "cross_service_call";
+  kind: 'cross_service_call';
   from_service: string;
   to_service: string;
   via: string;
@@ -110,16 +121,16 @@ export interface ExternalPackage {
 // Scan progress types for streaming UI updates
 
 export type ScanPhase =
-  | "discovering"
-  | "reading"
-  | "resolving_types"
-  | "analyzing"
-  | "validating"
-  | "cross_service"
-  | "merging"
-  | "writing"
-  | "done"
-  | "error";
+  | 'discovering'
+  | 'reading'
+  | 'resolving_types'
+  | 'analyzing'
+  | 'validating'
+  | 'cross_service'
+  | 'merging'
+  | 'writing'
+  | 'done'
+  | 'error';
 
 export interface ScanProgress {
   phase: ScanPhase;
@@ -172,7 +183,7 @@ export interface SimulationStep {
 }
 
 export interface SimulationEvent {
-  type: "step" | "breakpoint" | "complete" | "error";
+  type: 'step' | 'breakpoint' | 'complete' | 'error';
   step?: SimulationStep;
   node_id?: string;
   message?: string;

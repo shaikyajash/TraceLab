@@ -105,7 +105,11 @@
   "api_routes": {
     "POST /api/scan": {
       "description": "Scans a Rust workspace and produces a .tracelab.json graph",
-      "body": { "workspacePath": "string", "provider": "claude | gemini | openai", "forceRescan": "boolean" },
+      "body": {
+        "workspacePath": "string",
+        "provider": "claude | gemini | openai",
+        "forceRescan": "boolean"
+      },
       "response": "NDJSON stream of ScanProgress events"
     },
     "POST /api/load-graph": {
@@ -115,7 +119,12 @@
     },
     "POST /api/simulate": {
       "description": "Runs LLM-powered simulation through the component graph",
-      "body": { "graph": "ComponentsGraph", "start_node_id": "string", "initial_payload": "any", "breakpoints": "string[]" },
+      "body": {
+        "graph": "ComponentsGraph",
+        "start_node_id": "string",
+        "initial_payload": "any",
+        "breakpoints": "string[]"
+      },
       "response": "NDJSON stream of SimulationEvent (step | breakpoint | complete | error)"
     }
   },

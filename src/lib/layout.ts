@@ -1,6 +1,6 @@
-import dagre from "@dagrejs/dagre";
-import { type Node, type Edge } from "@xyflow/react";
-import { ComponentsGraph } from "./schema";
+import dagre from '@dagrejs/dagre';
+import { type Node, type Edge } from '@xyflow/react';
+import { ComponentsGraph } from './schema';
 
 const NODE_WIDTH = 210;
 const NODE_HEIGHT = 54;
@@ -12,9 +12,15 @@ export interface LayoutResult {
 }
 
 const FLOW_KINDS = new Set([
-  "route_handler", "transformer", "validator", "middleware",
-  "business_logic", "db_call", "external_http_call",
-  "message_queue", "function",
+  'route_handler',
+  'transformer',
+  'validator',
+  'middleware',
+  'business_logic',
+  'db_call',
+  'external_http_call',
+  'message_queue',
+  'function',
 ]);
 
 export function computeLayout(graph: ComponentsGraph): LayoutResult {
@@ -26,14 +32,12 @@ export function computeLayout(graph: ComponentsGraph): LayoutResult {
   }
 
   // 2. Filter to flow-relevant nodes
-  const flowNodes = graph.nodes.filter(
-    (n) => FLOW_KINDS.has(n.kind) || edgeNodeIds.has(n.id)
-  );
+  const flowNodes = graph.nodes.filter((n) => FLOW_KINDS.has(n.kind) || edgeNodeIds.has(n.id));
 
   // 3. Single flat dagre graph — no grouping, no parent/child
   const g = new dagre.graphlib.Graph();
   g.setGraph({
-    rankdir: "LR",
+    rankdir: 'LR',
     nodesep: 28,
     ranksep: 70,
     marginx: 50,
@@ -73,7 +77,10 @@ export function computeLayout(graph: ComponentsGraph): LayoutResult {
     const dn = g.node(node.id);
     if (!dn) continue;
     const bounds = serviceBounds.get(node.service) || {
-      minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity,
+      minX: Infinity,
+      minY: Infinity,
+      maxX: -Infinity,
+      maxY: -Infinity,
     };
     bounds.minX = Math.min(bounds.minX, dn.x - NODE_WIDTH / 2);
     bounds.minY = Math.min(bounds.minY, dn.y - NODE_HEIGHT / 2);
@@ -98,7 +105,7 @@ export function computeLayout(graph: ComponentsGraph): LayoutResult {
 
     rfNodes.push({
       id: `service:${service.id}`,
-      type: "serviceGroup",
+      type: 'serviceGroup',
       position: {
         x: bounds.minX - SERVICE_PAD,
         y: bounds.minY - SERVICE_PAD - SERVICE_HEADER,
@@ -125,7 +132,7 @@ export function computeLayout(graph: ComponentsGraph): LayoutResult {
 
     rfNodes.push({
       id: node.id,
-      type: "componentCard",
+      type: 'componentCard',
       position: {
         x: dn.x - NODE_WIDTH / 2,
         y: dn.y - NODE_HEIGHT / 2,
@@ -133,7 +140,7 @@ export function computeLayout(graph: ComponentsGraph): LayoutResult {
       data: {
         ...node,
         isBreakpoint: false,
-        simulationState: "idle" as const,
+        simulationState: 'idle' as const,
       },
     });
   }
@@ -150,7 +157,7 @@ export function computeLayout(graph: ComponentsGraph): LayoutResult {
       id: `edge-${i}`,
       source: edge.from,
       target: edge.to,
-      type: "animatedEdge",
+      type: 'animatedEdge',
       data: {
         payload: edge.payload,
         isCrossService: edge.from_service !== edge.to_service,
@@ -170,9 +177,9 @@ export function computeLayout(graph: ComponentsGraph): LayoutResult {
       id: `cross-${i}`,
       source: fromNode.id,
       target: toNode.id,
-      type: "animatedEdge",
+      type: 'animatedEdge',
       data: {
-        payload: call.payload_in || "",
+        payload: call.payload_in || '',
         isCrossService: true,
         isActive: false,
       },
@@ -180,18 +187,13 @@ export function computeLayout(graph: ComponentsGraph): LayoutResult {
   }
 
   // Entry points: only route_handler nodes
-  const entryPoints = graph.nodes
-    .filter((n) => n.kind === "route_handler")
-    .map((n) => n.id);
+  const entryPoints = graph.nodes.filter((n) => n.kind === 'route_handler').map((n) => n.id);
 
   return { nodes: rfNodes, edges: rfEdges, entryPoints };
 }
 
 // BFS from start node for simulation ordering
-export function computeNodeSequence(
-  graph: ComponentsGraph,
-  startNodeId: string
-): string[] {
+export function computeNodeSequence(graph: ComponentsGraph, startNodeId: string): string[] {
   const adjacency = new Map<string, string[]>();
   for (const edge of graph.edges) {
     const list = adjacency.get(edge.from) || [];

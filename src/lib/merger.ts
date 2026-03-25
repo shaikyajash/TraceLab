@@ -1,16 +1,11 @@
-import fs from "fs/promises";
-import path from "path";
-import {
-  ComponentsGraph,
-  PerServiceResult,
-  CrossServiceCall,
-  ExternalPackage,
-} from "./schema";
-import { getModelName } from "./claude";
+import fs from 'fs/promises';
+import path from 'path';
+import { ComponentsGraph, PerServiceResult, CrossServiceCall, ExternalPackage } from './schema';
+import { getModelName } from './claude';
 
 /** TraceLab project root — where all scan outputs are stored */
 const TRACELAB_ROOT = process.cwd();
-const SCANS_DIR = path.join(TRACELAB_ROOT, "scans");
+const SCANS_DIR = path.join(TRACELAB_ROOT, 'scans');
 
 function deduplicatePackages(packages: ExternalPackage[]): ExternalPackage[] {
   const byName = new Map<string, ExternalPackage>();
@@ -35,7 +30,10 @@ function deduplicatePackages(packages: ExternalPackage[]): ExternalPackage[] {
  */
 export function getOutputFileName(workspacePath: string): string {
   const dirName = path.basename(workspacePath);
-  const slug = dirName.toLowerCase().replace(/[^a-z0-9\-_]/g, "-").replace(/-+/g, "-");
+  const slug = dirName
+    .toLowerCase()
+    .replace(/[^a-z0-9\-_]/g, '-')
+    .replace(/-+/g, '-');
   return `${slug}.tracelab.json`;
 }
 
@@ -54,7 +52,7 @@ export async function loadExisting(workspacePath: string): Promise<ComponentsGra
   // Check scans/ directory first
   const outputPath = getOutputPath(workspacePath);
   try {
-    const content = await fs.readFile(outputPath, "utf-8");
+    const content = await fs.readFile(outputPath, 'utf-8');
     return JSON.parse(content) as ComponentsGraph;
   } catch {
     // Fall through
@@ -62,8 +60,8 @@ export async function loadExisting(workspacePath: string): Promise<ComponentsGra
 
   // Check legacy components.json in the scanned workspace
   try {
-    const legacyPath = path.join(workspacePath, "components.json");
-    const content = await fs.readFile(legacyPath, "utf-8");
+    const legacyPath = path.join(workspacePath, 'components.json');
+    const content = await fs.readFile(legacyPath, 'utf-8');
     return JSON.parse(content) as ComponentsGraph;
   } catch {
     return null;
@@ -73,11 +71,11 @@ export async function loadExisting(workspacePath: string): Promise<ComponentsGra
 export async function mergeAndWrite(
   workspacePath: string,
   perServiceResults: PerServiceResult[],
-  crossServiceCalls: CrossServiceCall[]
+  crossServiceCalls: CrossServiceCall[],
 ): Promise<ComponentsGraph> {
   const totalFiles = perServiceResults.reduce(
     (sum, r) => sum + r.nodes.filter((n) => n.defined_in).length,
-    0
+    0,
   );
 
   const graph: ComponentsGraph = {
@@ -93,9 +91,7 @@ export async function mergeAndWrite(
     edges: perServiceResults.flatMap((r) => r.edges),
     mutations: perServiceResults.flatMap((r) => r.mutations),
     cross_service_calls: crossServiceCalls,
-    external_packages: deduplicatePackages(
-      perServiceResults.flatMap((r) => r.external_packages)
-    ),
+    external_packages: deduplicatePackages(perServiceResults.flatMap((r) => r.external_packages)),
     traces: perServiceResults.flatMap((r) => r.traces || []),
   };
 
@@ -103,7 +99,7 @@ export async function mergeAndWrite(
   await fs.mkdir(SCANS_DIR, { recursive: true });
 
   const outputPath = getOutputPath(workspacePath);
-  await fs.writeFile(outputPath, JSON.stringify(graph, null, 2), "utf-8");
+  await fs.writeFile(outputPath, JSON.stringify(graph, null, 2), 'utf-8');
 
   return graph;
 }

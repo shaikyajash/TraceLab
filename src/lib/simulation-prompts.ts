@@ -1,4 +1,4 @@
-import { ComponentNode } from "./schema";
+import { ComponentNode } from './schema';
 
 export interface TraceStepContext {
   /** Label of the selected trace, e.g. "Generate Credentials (EVM-to-EVM)" */
@@ -49,7 +49,7 @@ You are at step ${traceContext.stepIndex + 1} of ${traceContext.totalSteps}.
 WHAT SHOULD HAPPEN AT THIS STEP:
 ${traceContext.stepSummary}
 
-${traceContext.edgeLabel ? `DATA FLOWING IN: ${traceContext.edgeLabel}` : ""}
+${traceContext.edgeLabel ? `DATA FLOWING IN: ${traceContext.edgeLabel}` : ''}
 
 CRITICAL RULES FOR TRACE-AWARE SIMULATION:
 1. Follow the step summary EXACTLY. It describes the specific branch taken and why.
@@ -95,10 +95,10 @@ Use these definitions to validate input values. If the input contains a value li
 Name: ${node.name}
 Kind: ${node.kind}
 Service: ${node.service}
-Input type: ${node.input || "unknown"}
-Output type: ${node.output || "unknown"}
-${node.description ? `Description: ${node.description}` : ""}
-${node.mutates_state ? `Mutates: ${node.mutation_target || "state"}` : ""}
+Input type: ${node.input || 'unknown'}
+Output type: ${node.output || 'unknown'}
+${node.description ? `Description: ${node.description}` : ''}
+${node.mutates_state ? `Mutates: ${node.mutation_target || 'state'}` : ''}
 
 ${sourceInfo}
 

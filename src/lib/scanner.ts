@@ -1,9 +1,9 @@
-import fs from "fs/promises";
-import path from "path";
-import { parse as parseTOML } from "smol-toml";
-import { DiscoveredService } from "./schema";
+import fs from 'fs/promises';
+import path from 'path';
+import { parse as parseTOML } from 'smol-toml';
+import { DiscoveredService } from './schema';
 
-const SKIP_DIRS = new Set(["target", "node_modules", ".git", ".idea", ".vscode"]);
+const SKIP_DIRS = new Set(['target', 'node_modules', '.git', '.idea', '.vscode']);
 const MAX_FILE_SIZE = 100 * 1024; // 100KB
 
 export async function validateWorkspacePath(workspacePath: string): Promise<void> {
@@ -20,7 +20,7 @@ async function findCargoTomls(dir: string, results: string[] = []): Promise<stri
     const fullPath = path.join(dir, entry.name);
     if (entry.isDirectory()) {
       await findCargoTomls(fullPath, results);
-    } else if (entry.name === "Cargo.toml") {
+    } else if (entry.name === 'Cargo.toml') {
       results.push(fullPath);
     }
   }
@@ -30,7 +30,7 @@ async function findCargoTomls(dir: string, results: string[] = []): Promise<stri
 function isWorkspaceRoot(tomlContent: string): boolean {
   try {
     const parsed = parseTOML(tomlContent);
-    return "workspace" in parsed && !("package" in parsed);
+    return 'workspace' in parsed && !('package' in parsed);
   } catch {
     return false;
   }
@@ -40,7 +40,7 @@ function getPackageName(tomlContent: string, dirName: string): string {
   try {
     const parsed = parseTOML(tomlContent);
     const pkg = parsed.package as Record<string, unknown> | undefined;
-    if (pkg && typeof pkg.name === "string") return pkg.name;
+    if (pkg && typeof pkg.name === 'string') return pkg.name;
   } catch {
     // fall through
   }
@@ -52,7 +52,7 @@ export async function discoverServices(workspacePath: string): Promise<Discovere
   const services: DiscoveredService[] = [];
 
   for (const tomlPath of cargoTomls) {
-    const content = await fs.readFile(tomlPath, "utf-8");
+    const content = await fs.readFile(tomlPath, 'utf-8');
     if (isWorkspaceRoot(content)) continue;
 
     const serviceDir = path.dirname(tomlPath);
@@ -62,7 +62,7 @@ export async function discoverServices(workspacePath: string): Promise<Discovere
 
     services.push({
       name,
-      path: relativePath || ".",
+      path: relativePath || '.',
       cargoTomlPath: path.relative(workspacePath, tomlPath),
       rsFiles: [],
     });
@@ -80,7 +80,7 @@ async function findRsFiles(dir: string): Promise<string[]> {
     if (entry.isDirectory()) {
       const nested = await findRsFiles(fullPath);
       results.push(...nested);
-    } else if (entry.name.endsWith(".rs")) {
+    } else if (entry.name.endsWith('.rs')) {
       results.push(fullPath);
     }
   }
@@ -89,7 +89,7 @@ async function findRsFiles(dir: string): Promise<string[]> {
 
 export async function readServiceSource(
   workspacePath: string,
-  service: DiscoveredService
+  service: DiscoveredService,
 ): Promise<DiscoveredService> {
   const serviceDir = path.join(workspacePath, service.path);
   const rsFiles = await findRsFiles(serviceDir);
@@ -98,7 +98,7 @@ export async function readServiceSource(
   for (const filePath of rsFiles) {
     const stat = await fs.stat(filePath);
     if (stat.size > MAX_FILE_SIZE) continue;
-    const content = await fs.readFile(filePath, "utf-8");
+    const content = await fs.readFile(filePath, 'utf-8');
     fileContents.push({
       relativePath: path.relative(workspacePath, filePath),
       content,

@@ -208,6 +208,7 @@ Pre-computed execution paths through the service. These power the trace simulato
 ```
 
 **Trace fields:**
+
 - `route_id` — which route_handler this trace starts from
 - `label` — human-readable name **including the branch variant** (e.g. "Generate (UTXO chains)" not just "Generate")
 - `description` — what this path does AND how it differs from other traces for the same route
