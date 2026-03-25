@@ -228,54 +228,31 @@ export default function OnboardingFlow({ onComplete }: OnboardingFlowProps) {
               </div>
               
               {uploadMode === 'path' ? (
-                <>
-                  <div className="mb-4">
-                    <label className="block text-xs font-medium mb-2" style={{ color: 'var(--text2)' }}>
-                      Repository Source
-                    </label>
-                    <input
-                      type="text"
-                      value={repoPath}
-                      onChange={e => setRepoPath(e.target.value)}
-                      placeholder="./test-server or https://github.com/user/repo"
-                      className="w-full px-4 py-2 border text-sm"
-                      style={{
-                        background: 'var(--bg)',
-                        borderColor: 'var(--border)',
-                        color: 'var(--text)'
-                      }}
-                    />
-                    <div className="mt-2 space-y-1">
-                      <p className="text-xs" style={{ color: 'var(--text3)' }}>
-                        • Local: <span className="font-mono">./test-server</span> or <span className="font-mono">/path/to/repo</span>
-                      </p>
-                      <p className="text-xs" style={{ color: 'var(--text3)' }}>
-                        • GitHub: <span className="font-mono">https://github.com/username/repo</span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mb-4">
-                    <label className="block text-xs font-medium mb-2" style={{ color: 'var(--text2)' }}>
-                      Backend URL (Optional - for live testing)
-                    </label>
-                    <input
-                      type="text"
-                      value={backendUrl}
-                      onChange={e => setBackendUrl(e.target.value)}
-                      placeholder="https://api.example.com or http://localhost:3000"
-                      className="w-full px-4 py-2 border text-sm"
-                      style={{
-                        background: 'var(--bg)',
-                        borderColor: 'var(--border)',
-                        color: 'var(--text)'
-                      }}
-                    />
-                    <p className="text-xs mt-2" style={{ color: 'var(--text3)' }}>
-                      If provided, we'll use this URL to execute actual requests
+                <div className="mb-4">
+                  <label className="block text-xs font-medium mb-2" style={{ color: 'var(--text2)' }}>
+                    Repository Source
+                  </label>
+                  <input
+                    type="text"
+                    value={repoPath}
+                    onChange={e => setRepoPath(e.target.value)}
+                    placeholder="./test-server or https://github.com/user/repo"
+                    className="w-full px-4 py-2 border text-sm"
+                    style={{
+                      background: 'var(--bg)',
+                      borderColor: 'var(--border)',
+                      color: 'var(--text)'
+                    }}
+                  />
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs" style={{ color: 'var(--text3)' }}>
+                      • Local: <span className="font-mono">./test-server</span> or <span className="font-mono">/path/to/repo</span>
+                    </p>
+                    <p className="text-xs" style={{ color: 'var(--text3)' }}>
+                      • GitHub: <span className="font-mono">https://github.com/username/repo</span>
                     </p>
                   </div>
-                </>
+                </div>
               ) : (
                 <div className="mb-4">
                   <label className="block text-xs font-medium mb-2" style={{ color: 'var(--text2)' }}>

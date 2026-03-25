@@ -33,7 +33,18 @@ export async function POST(request: NextRequest) {
     if (repoPath.startsWith('http://') || repoPath.startsWith('https://')) {
       console.log('Cloning GitHub repository:', repoPath);
       
-      const tempDir = path.join(process.cwd(), 'temp-repos', repoName || 'repo');
+      // Sanitize repo name - remove spaces, special chars, trim
+      const sanitizedName = (repoName || 'repo')
+        .trim()
+        .replace(/\s+/g, '-')
+        .replace(/[^a-zA-Z0-9-_]/g, '')
+        .replace(/^-+|-+$/g, '') // Remove leading/trailing dashes
+        .toLowerCase() || 'repo'; // Fallback if empty after sanitization
+      
+      const tempDir = path.join(process.cwd(), 'temp-repos', sanitizedName).trim();
+      
+      console.log('Sanitized repo name:', sanitizedName);
+      console.log('Target directory:', tempDir);
       
       // Create temp directory
       if (!fs.existsSync(path.dirname(tempDir))) {

@@ -285,41 +285,31 @@
           "functions": [
             {
               "name": "new",
-              "params": [
-                "path: &str"
-              ],
+              "params": ["path: &str"],
               "returns": "Self",
               "transformsData": false
             },
             {
               "name": "resolve_chain_key_for_family",
-              "params": [
-                "family: &str"
-              ],
+              "params": ["family: &str"],
               "returns": "Result<String, String>",
               "transformsData": true
             },
             {
               "name": "get_native_asset",
-              "params": [
-                "chain_id: &str"
-              ],
+              "params": ["chain_id: &str"],
               "returns": "Option<&NativeAssetConfig>",
               "transformsData": false
             },
             {
               "name": "get_evm_multicall3_address",
-              "params": [
-                "chain_id: &str"
-              ],
+              "params": ["chain_id: &str"],
               "returns": "Option<String>",
               "transformsData": false
             },
             {
               "name": "get_starknet_multicall_address",
-              "params": [
-                "chain_id: &str"
-              ],
+              "params": ["chain_id: &str"],
               "returns": "Option<String>",
               "transformsData": false
             }
@@ -362,17 +352,13 @@
             },
             {
               "name": "get_or_fetch",
-              "params": [
-                "config: &AppConfig"
-              ],
+              "params": ["config: &AppConfig"],
               "returns": "Result<Arc<Vec<Asset>>, ApiErrors>",
               "transformsData": false
             },
             {
               "name": "warm_cache",
-              "params": [
-                "config: &AppConfig"
-              ],
+              "params": ["config: &AppConfig"],
               "returns": "Arc<Vec<Asset>>",
               "transformsData": true
             }
@@ -386,17 +372,13 @@
           "functions": [
             {
               "name": "new",
-              "params": [
-                "config: Arc<AppConfig>"
-              ],
+              "params": ["config: Arc<AppConfig>"],
               "returns": "Self",
               "transformsData": false
             },
             {
               "name": "build_legacy_assets",
-              "params": [
-                "cdn_url: String"
-              ],
+              "params": ["cdn_url: String"],
               "returns": "()",
               "transformsData": true
             },
@@ -414,19 +396,13 @@
             },
             {
               "name": "get_token_address",
-              "params": [
-                "chain: String",
-                "atomic_swap_address: String"
-              ],
+              "params": ["chain: String", "atomic_swap_address: String"],
               "returns": "Option<String>",
               "transformsData": false
             },
             {
               "name": "from_contract",
-              "params": [
-                "chain: &str",
-                "token_address: &str"
-              ],
+              "params": ["chain: &str", "token_address: &str"],
               "returns": "Result<u8, Box<dyn Error>>",
               "transformsData": false
             },
@@ -440,9 +416,7 @@
             },
             {
               "name": "from_asset_id",
-              "params": [
-                "id: String"
-              ],
+              "params": ["id: String"],
               "returns": "Option<(String, String)>",
               "transformsData": false
             },
@@ -462,9 +436,7 @@
           "functions": [
             {
               "name": "init",
-              "params": [
-                "settings: Arc<AppConfig>"
-              ],
+              "params": ["settings: Arc<AppConfig>"],
               "returns": "Self",
               "transformsData": false
             },
@@ -484,11 +456,7 @@
           "functions": [
             {
               "name": "get_decimals",
-              "params": [
-                "rpc_proxy: &str",
-                "chain: &str",
-                "address: &str"
-              ],
+              "params": ["rpc_proxy: &str", "chain: &str", "address: &str"],
               "returns": "Result<u8, Box<dyn Error>>",
               "transformsData": false
             },
@@ -508,11 +476,7 @@
           "functions": [
             {
               "name": "get_decimals",
-              "params": [
-                "_rpc_proxy: &str",
-                "_chain: &str",
-                "_address: &str"
-              ],
+              "params": ["_rpc_proxy: &str", "_chain: &str", "_address: &str"],
               "returns": "Result<u8, Box<dyn Error>>",
               "transformsData": false
             },
@@ -532,11 +496,7 @@
           "functions": [
             {
               "name": "get_decimals",
-              "params": [
-                "rpc_proxy: &str",
-                "chain: &str",
-                "token_address: &str"
-              ],
+              "params": ["rpc_proxy: &str", "chain: &str", "token_address: &str"],
               "returns": "Result<u8, Box<dyn Error>>",
               "transformsData": false
             },
@@ -556,11 +516,7 @@
           "functions": [
             {
               "name": "get_decimals",
-              "params": [
-                "_rpc_proxy: &str",
-                "_chain: &str",
-                "_address: &str"
-              ],
+              "params": ["_rpc_proxy: &str", "_chain: &str", "_address: &str"],
               "returns": "Result<u8, Box<dyn Error>>",
               "transformsData": false
             },
@@ -580,11 +536,7 @@
           "functions": [
             {
               "name": "get_decimals",
-              "params": [
-                "rpc_proxy: &str",
-                "chain: &str",
-                "token_address: &str"
-              ],
+              "params": ["rpc_proxy: &str", "chain: &str", "token_address: &str"],
               "returns": "Result<u8, Box<dyn Error>>",
               "transformsData": false
             },
@@ -604,11 +556,7 @@
           "functions": [
             {
               "name": "get_decimals",
-              "params": [
-                "_rpc_proxy: &str",
-                "_chain: &str",
-                "_token_address: &str"
-              ],
+              "params": ["_rpc_proxy: &str", "_chain: &str", "_token_address: &str"],
               "returns": "Result<u8, Box<dyn Error>>",
               "transformsData": false
             },
@@ -628,112 +576,73 @@
           "functions": [
             {
               "name": "new",
-              "params": [
-                "batch_window_ms: u64",
-                "max_batch_size: usize"
-              ],
+              "params": ["batch_window_ms: u64", "max_batch_size: usize"],
               "returns": "Self",
               "transformsData": false
             },
             {
               "name": "submit_request",
-              "params": [
-                "chain: Chain",
-                "address: String",
-                "app_state: Arc<AppState>"
-              ],
+              "params": ["chain: Chain", "address: String", "app_state: Arc<AppState>"],
               "returns": "Result<Vec<BalanceInfo>, ApiErrors>",
               "transformsData": true
             },
             {
               "name": "process_batch",
-              "params": [
-                "chain: Chain",
-                "requests: Vec<PendingRequest>",
-                "app_state: Arc<AppState>"
-              ],
+              "params": ["chain: Chain", "requests: Vec<PendingRequest>", "app_state: Arc<AppState>"],
               "returns": "()",
               "transformsData": true
             },
             {
               "name": "process_batch_internal",
-              "params": [
-                "chain: Chain",
-                "requests: Vec<PendingRequest>",
-                "app_state: Arc<AppState>"
-              ],
+              "params": ["chain: Chain", "requests: Vec<PendingRequest>", "app_state: Arc<AppState>"],
               "returns": "()",
               "transformsData": true
             },
             {
               "name": "fetch_evm_balances_batch",
-              "params": [
-                "addresses: Vec<String>",
-                "app_state: Arc<AppState>"
-              ],
+              "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
               "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
               "transformsData": true
             },
             {
               "name": "fetch_solana_balances_batch",
-              "params": [
-                "addresses: Vec<String>",
-                "app_state: Arc<AppState>"
-              ],
+              "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
               "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
               "transformsData": true
             },
             {
               "name": "fetch_starknet_balances_batch",
-              "params": [
-                "addresses: Vec<String>",
-                "app_state: Arc<AppState>"
-              ],
+              "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
               "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
               "transformsData": true
             },
             {
               "name": "fetch_bitcoin_balances_batch",
-              "params": [
-                "addresses: Vec<String>",
-                "app_state: Arc<AppState>"
-              ],
+              "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
               "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
               "transformsData": true
             },
             {
               "name": "fetch_tron_balances_batch",
-              "params": [
-                "addresses: Vec<String>",
-                "app_state: Arc<AppState>"
-              ],
+              "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
               "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
               "transformsData": true
             },
             {
               "name": "fetch_xrpl_balances_batch",
-              "params": [
-                "addresses: Vec<String>",
-                "app_state: Arc<AppState>"
-              ],
+              "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
               "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
               "transformsData": true
             },
             {
               "name": "fetch_spark_balances_batch",
-              "params": [
-                "addresses: Vec<String>",
-                "app_state: Arc<AppState>"
-              ],
+              "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
               "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
               "transformsData": true
             },
             {
               "name": "fetch_litecoin_balances_batch",
-              "params": [
-                "addresses: Vec<String>",
-                "app_state: Arc<AppState>"
-              ],
+              "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
               "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
               "transformsData": true
             }
@@ -747,75 +656,49 @@
           "functions": [
             {
               "name": "detect_address_type",
-              "params": [
-                "address: &str"
-              ],
+              "params": ["address: &str"],
               "returns": "Result<(AddressType, BitcoinNetwork), Box<dyn std::error::Error + Send + Sync>>",
               "transformsData": false
             },
             {
               "name": "estimate_transaction_size",
-              "params": [
-                "address_type: AddressType",
-                "utxo_count: usize"
-              ],
+              "params": ["address_type: AddressType", "utxo_count: usize"],
               "returns": "usize",
               "transformsData": false
             },
             {
               "name": "get_fee_rate",
-              "params": [
-                "base_url: &str"
-              ],
+              "params": ["base_url: &str"],
               "returns": "Result<u64, Box<dyn std::error::Error + Send + Sync>>",
               "transformsData": false
             },
             {
               "name": "get_balance_from_mempool",
-              "params": [
-                "address: &str",
-                "base_url: &str"
-              ],
+              "params": ["address: &str", "base_url: &str"],
               "returns": "Result<(u128, usize), Box<dyn std::error::Error + Send + Sync>>",
               "transformsData": false
             },
             {
               "name": "get_balance_from_blockcypher",
-              "params": [
-                "address: &str",
-                "base_url: &str"
-              ],
+              "params": ["address: &str", "base_url: &str"],
               "returns": "Result<(u128, usize), Box<dyn std::error::Error + Send + Sync>>",
               "transformsData": false
             },
             {
               "name": "get_balance_from_blockchair",
-              "params": [
-                "address: &str",
-                "base_url: &str"
-              ],
+              "params": ["address: &str", "base_url: &str"],
               "returns": "Result<(u128, usize), Box<dyn std::error::Error + Send + Sync>>",
               "transformsData": false
             },
             {
               "name": "get_bitcoin_balance",
-              "params": [
-                "address: &str",
-                "mempool_base_url: &str",
-                "blockcypher_base_url: &str",
-                "blockchair_base_url: &str"
-              ],
+              "params": ["address: &str", "mempool_base_url: &str", "blockcypher_base_url: &str", "blockchair_base_url: &str"],
               "returns": "Result<(u128, usize), Box<dyn std::error::Error + Send + Sync>>",
               "transformsData": false
             },
             {
               "name": "calculate_spendable_balance",
-              "params": [
-                "address: &str",
-                "balance: u128",
-                "utxo_count: usize",
-                "bitcoin_rpc: &str"
-              ],
+              "params": ["address: &str", "balance: u128", "utxo_count: usize", "bitcoin_rpc: &str"],
               "returns": "Result<u128, Box<dyn std::error::Error + Send + Sync>>",
               "transformsData": false
             },
@@ -841,28 +724,19 @@
           "functions": [
             {
               "name": "is_evm_native_asset",
-              "params": [
-                "asset: &Asset"
-              ],
+              "params": ["asset: &Asset"],
               "returns": "bool",
               "transformsData": false
             },
             {
               "name": "ensure_native_token_for_evm_chain",
-              "params": [
-                "config: &AppConfig",
-                "chain_id: &str",
-                "assets: &mut Vec<Asset>"
-              ],
+              "params": ["config: &AppConfig", "chain_id: &str", "assets: &mut Vec<Asset>"],
               "returns": "()",
               "transformsData": true
             },
             {
               "name": "ensure_seed_for_arbitrum",
-              "params": [
-                "chain: &str",
-                "assets: &mut Vec<Asset>"
-              ],
+              "params": ["chain: &str", "assets: &mut Vec<Asset>"],
               "returns": "()",
               "transformsData": true
             },
@@ -902,19 +776,13 @@
           "functions": [
             {
               "name": "get_asset_decimals_handler",
-              "params": [
-                "chain: String",
-                "token_address: String"
-              ],
+              "params": ["chain: String", "token_address: String"],
               "returns": "Response",
               "transformsData": false
             },
             {
               "name": "get_address_balances_handler",
-              "params": [
-                "chain: String",
-                "address: String"
-              ],
+              "params": ["chain: String", "address: String"],
               "returns": "Response",
               "transformsData": false
             },

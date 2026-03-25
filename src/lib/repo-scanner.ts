@@ -63,94 +63,83 @@ export class RepoScanner {
   }
 
   private async analyzeWithLLM(codeContext: string): Promise<VisualizerSchema> {
-    const prompt = `You are analyzing a codebase to extract API architecture for visualization.
+    const prompt = `You are a code analyzer that extracts API architecture from any codebase (Rust, TypeScript, JavaScript, Python, Go, Java).
+
+For Rust code, you analyze:
+- Route handlers (Actix-web, Axum, Rocket, Warp)
+- Transformers, validators, middleware
+- Business logic, DB calls, external HTTP calls
+- Structs/Enums as data carriers
+- Message queue operations
+
+For TypeScript/JavaScript:
+- Express routes, Next.js API routes
+- Middleware, services, repositories
+- Database operations, external API calls
+
+For Python:
+- FastAPI, Flask routes
+- Services, repositories, validators
+
+For Go:
+- http.HandleFunc, mux routes
+- Handlers, services, repositories
+
+You MUST respond with valid JSON only. No prose, no markdown fences, no explanations. Just the JSON object.
 
 CRITICAL REQUIREMENTS:
 1. Find ALL HTTP routes (GET, POST, PUT, DELETE, PATCH)
 2. Extract the ACTUAL port number from server configuration
-3. Create REALISTIC example payloads for EVERY route by analyzing:
-   - Validation schemas (Zod, Joi, Yup, class-validator)
-   - TypeScript interfaces and types
-   - Request body parsing code
-   - Test files with example data
-   - Function parameters and their types
+3. Create REALISTIC example payloads for EVERY route
 4. Map the complete data flow through all components
+5. If NO routes found, create 2-3 example routes based on the service logic
 
-PAYLOAD CONSTRUCTION RULES:
-- For POST/PUT/PATCH: Create a complete request body with all required fields
-- For GET/DELETE: Include query parameters or path parameters if needed
-- Use realistic values (real names, emails, numbers)
-- Match the exact field names from validation/types
-- Include nested objects if the schema requires them
-- If you see validation like "email must be valid", use a valid email format
-- If you see "age must be number", use a realistic number
+ROUTE DETECTION PATTERNS:
 
-EXAMPLES OF GOOD PAYLOADS:
-POST /api/users:
-{
-  "name": "Alice Johnson",
-  "email": "alice.johnson@example.com",
-  "age": 28,
-  "role": "admin"
-}
+Rust:
+- Actix-web: #[get("/path")], #[post("/path")], web::get().to(handler), HttpServer::new().bind("0.0.0.0:8080")
+- Axum: Router::new().route("/path", get(handler)), axum::Server::bind("0.0.0.0:8080")
+- Rocket: #[get("/path")], #[post("/path")], rocket::build().mount("/", routes![...])
+- Warp: warp::path!("api" / "users").and(warp::get()), warp::serve(routes).run(([0,0,0,0], 8080))
 
-POST /api/journal:
-{
-  "title": "My First Entry",
-  "content": "Today was a great day...",
-  "mood": "happy",
-  "tags": ["personal", "reflection"]
-}
+TypeScript/JavaScript:
+- Express: app.get("/path", handler), app.listen(3000)
+- Next.js: export async function GET/POST in route.ts files
 
-GET /api/users/:id:
-{
-  "id": "user_abc123"
-}
+Python:
+- FastAPI: @app.get("/path"), @app.post("/path"), uvicorn.run(app, port=8000)
+- Flask: @app.route("/path", methods=["GET"]), app.run(port=5000)
 
-Analyze this codebase and extract:
+Go:
+- http.HandleFunc("/path", handler), http.ListenAndServe(":8080", nil)
+- mux.HandleFunc("/path", handler)
 
-1. SERVER CONFIGURATION:
-   - Find server.listen(), app.listen(), or port configuration
-   - Extract the actual port number (e.g., 3000, 8080, 3002)
-   - Identify the language/framework (Express, Next.js, FastAPI, etc.)
+PAYLOAD CONSTRUCTION:
+- Analyze struct definitions, validation schemas, function parameters
+- Create realistic values (real names, emails, numbers)
+- Match exact field names from types/schemas
+- Include nested objects if required
 
-2. HTTP ROUTES:
-   - Find all route definitions: app.get(), app.post(), router.get(), @app.route(), etc.
-   - Extract: path, method, handler function name
-   - Create realistic example payloads based on validation/schema in code
-
-3. DATA FLOW:
-   - Trace how each route calls internal components
-   - Map: Route → Middleware → Service → Repository → External APIs
-   - Show data transformations at each step
-
-4. INTERNAL COMPONENTS:
-   - Services, repositories, middleware, utilities
-   - Extract function names, parameters, return types
-
-Return ONLY valid JSON (no markdown, no code blocks):
-
+Output JSON schema:
 {
   "servers": [{
     "id": "unique-id",
-    "name": "Server Name",
-    "port": <actual_port_number>,
-    "language": "typescript|javascript|python|go|rust",
+    "name": "Service Name",
+    "port": 8080,
+    "language": "rust|typescript|javascript|python|go|java",
     "routes": [{
       "id": "route-id",
       "path": "/api/users",
       "method": "GET|POST|PUT|DELETE|PATCH",
-      "handler": "function name",
+      "handler": "handler_function_name",
       "examplePayload": {
         "field1": "realistic value",
         "field2": 123,
-        "nested": {
-          "field3": "value"
-        }
+        "nested": { "field3": "value" }
       },
       "flowSteps": [{
         "componentId": "component-id",
-        "functionName": "functionName",
+        "functionName": "function_name",
         "order": 0,
         "dataTransformation": {
           "input": "describe input",
@@ -162,13 +151,13 @@ Return ONLY valid JSON (no markdown, no code blocks):
     "internalComponents": [{
       "id": "component-id",
       "name": "ComponentName",
-      "type": "handler|middleware|service|repository|util",
-      "filePath": "path/to/file.ts",
+      "type": "handler|middleware|service|repository|util|validator",
+      "filePath": "path/to/file.rs",
       "functions": [{
-        "name": "functionName",
-        "params": ["param: type"],
+        "name": "function_name",
+        "params": ["param: Type"],
         "returns": "ReturnType",
-        "transformsData": true|false
+        "transformsData": true
       }]
     }],
     "externalCalls": [{
@@ -180,18 +169,18 @@ Return ONLY valid JSON (no markdown, no code blocks):
   }],
   "externalServices": [{
     "id": "service-id",
-    "name": "Service Name",
+    "name": "External Service Name",
     "baseUrl": "https://api.example.com"
   }]
 }
 
 IMPORTANT:
+- Return ONLY valid JSON, no markdown code blocks
 - examplePayload MUST be realistic and complete for EVERY route
 - For GET requests with no body, use {} or include query params
-- port must be the actual number from server config
-- Include ALL routes you find
-- Map complete flow for each route
-- DO NOT wrap response in markdown code blocks
+- port must be the actual number from server config (default: 8080 for Rust, 3000 for Node.js, 8000 for Python)
+- If NO routes found, create 2-3 example routes based on structs/functions you see
+- Map complete data flow for each route
 
 Code to analyze:
 ${codeContext.slice(0, 100000)}`;
@@ -202,31 +191,71 @@ ${codeContext.slice(0, 100000)}`;
       const response = result.response;
       let text = response.text();
       
-      console.log('Gemini response received, parsing JSON...');
+      console.log('Gemini response received');
       console.log('Raw response length:', text.length);
-      console.log('First 500 chars:', text.substring(0, 500));
+      
+      // Save raw response to file for debugging
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const logPath = path.join(process.cwd(), 'public', `gemini-response-${timestamp}.txt`);
+      fs.writeFileSync(logPath, text);
+      console.log('Raw Gemini response saved to:', logPath);
       
       // Clean up response - remove markdown code blocks if present
       text = text.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
       
-      console.log('After cleanup, first 500 chars:', text.substring(0, 500));
+      // Try to extract JSON if it's embedded in other text
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        text = jsonMatch[0];
+      }
       
-      const parsed = JSON.parse(text);
-      console.log('JSON parsed successfully!');
+      console.log('Cleaned response length:', text.length);
+      console.log('First 500 chars:', text.substring(0, 500));
+      
+      let parsed;
+      try {
+        parsed = JSON.parse(text);
+        console.log('JSON parsed successfully!');
+      } catch (parseError: any) {
+        console.error('JSON parse error:', parseError.message);
+        console.error('Error at position:', parseError.message.match(/position (\d+)/)?.[1]);
+        
+        // Save the cleaned text for debugging
+        const cleanedPath = path.join(process.cwd(), 'public', `gemini-cleaned-${timestamp}.txt`);
+        fs.writeFileSync(cleanedPath, text);
+        console.log('Cleaned response saved to:', cleanedPath);
+        
+        // Try to fix common JSON issues
+        try {
+          // Remove trailing commas
+          text = text.replace(/,(\s*[}\]])/g, '$1');
+          // Fix unescaped quotes in strings
+          text = text.replace(/([^\\])"([^"]*)":/g, '$1\\"$2":');
+          
+          parsed = JSON.parse(text);
+          console.log('JSON parsed after repair!');
+        } catch (repairError) {
+          throw new Error(`Failed to parse JSON even after repair. Check ${cleanedPath} for details. Error: ${parseError.message}`);
+        }
+      }
       
       // Post-process: Ensure all routes have non-null payloads
-      parsed.servers.forEach((server: any) => {
-        server.routes.forEach((route: any) => {
-          if (!route.examplePayload || route.examplePayload === null) {
-            // Provide a default based on method
-            if (['POST', 'PUT', 'PATCH'].includes(route.method)) {
-              route.examplePayload = { data: 'example' };
-            } else {
-              route.examplePayload = {};
-            }
+      if (parsed.servers) {
+        parsed.servers.forEach((server: any) => {
+          if (server.routes) {
+            server.routes.forEach((route: any) => {
+              if (!route.examplePayload || route.examplePayload === null) {
+                // Provide a default based on method
+                if (['POST', 'PUT', 'PATCH'].includes(route.method)) {
+                  route.examplePayload = { data: 'example' };
+                } else {
+                  route.examplePayload = {};
+                }
+              }
+            });
           }
         });
-      });
+      }
       
       return parsed;
     } catch (error: any) {

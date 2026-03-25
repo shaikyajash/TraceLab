@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useState, useEffect } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import {
   ReactFlow,
   Node,
@@ -21,16 +21,36 @@ interface FlowVisualizerProps {
   selectedRoute?: Route;
   executionSteps?: ExecutionStep[];
   currentStep?: number;
+  onNodeSelect?: (node: any) => void;
 }
+
+const KIND_STYLES: Record<string, { bg: string; border: string; badge: string; badgeBg: string; label: string }> = {
+  handler: { bg: '#f0f4f9', border: '#378ADD', badge: '#0C447C', badgeBg: '#B5D4F4', label: 'ROUTE' },
+  middleware: { bg: '#f5f3f9', border: '#7F77DD', badge: '#3C3489', badgeBg: '#CECBF6', label: 'MIDDLEWARE' },
+  service: { bg: '#f0f9f0', border: '#639922', badge: '#27500A', badgeBg: '#C0DD97', label: 'SERVICE' },
+  repository: { bg: '#f0f7f9', border: '#1D9E75', badge: '#085041', badgeBg: '#9FE1CB', label: 'DB' },
+  util: { bg: '#f9f5f0', border: '#BA7517', badge: '#633806', badgeBg: '#FAC775', label: 'UTIL' },
+  validator: { bg: '#f9f3f0', border: '#D85A30', badge: '#712B13', badgeBg: '#F5C4B3', label: 'VALIDATOR' },
+};
 
 export default function FlowVisualizer({
   server,
   selectedRoute,
   executionSteps = [],
   currentStep = 0,
+  onNodeSelect,
 }: FlowVisualizerProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
+  const handleNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
+    if (onNodeSelect) {
+      const stepIndex = parseInt(node.id.split('-step-')[1]);
+      const flowStep = selectedRoute?.flowSteps[stepIndex];
+      const component = server.internalComponents.find(c => c.id === flowStep?.componentId);
+      onNodeSelect({ node, flowStep, component, stepIndex });
+    }
+  }, [onNodeSelect, selectedRoute, server]);
 
   useEffect(() => {
     if (!selectedRoute) return;
@@ -38,191 +58,164 @@ export default function FlowVisualizer({
     const newNodes: Node[] = [];
     const newEdges: Edge[] = [];
 
-    // Server container node
-    newNodes.push({
-      id: server.id,
-      type: 'group',
-      data: { 
-        label: (
-          <div style={{ 
-            padding: '12px 16px',
-            background: 'var(--bg2)',
-            borderRadius: '12px 12px 0 0',
-            borderBottom: '1px solid var(--border)'
-          }}>
-            <div style={{ 
-              fontSize: '13px', 
-              fontWeight: 600, 
-              color: 'var(--text)',
-              marginBottom: '2px'
-            }}>
-              {server.name}
-            </div>
-            <div style={{ 
-              fontSize: '10px', 
-              fontFamily: 'JetBrains Mono, monospace',
-              color: 'var(--text3)' 
-            }}>
-              :{server.port} · {server.language}
-            </div>
-          </div>
-        )
-      },
-      position: { x: 50, y: 50 },
-      style: {
-        width: 1200,
-        height: 800,
-        background: 'var(--bg1)',
-        border: '1px solid var(--border2)',
-        borderRadius: '16px',
-        padding: 0
-      },
+    // Smart layout algorithm
+    // - Parallel services (same type, independent) go horizontal
+    // - Sequential services (dependent) go vertical
+    // - Group by component type for better visualization
+    
+    const nodeWidth = 200;
+    const nodeHeight = 90;
+    const verticalGap = 100;
+    const horizontalGap = 250;
+    const startX = 150;
+    const startY = 50;
+
+    // Analyze flow to detect parallel vs sequential patterns
+    const steps = selectedRoute.flowSteps.map((step, index) => {
+      const component = server.internalComponents.find(c => c.id === step.componentId);
+      return { step, component, index };
     });
 
-    // Create nodes for each component in the flow
-    selectedRoute.flowSteps.forEach((step, index) => {
-      const component = server.internalComponents.find(
-        c => c.id === step.componentId
-      );
+    // Group consecutive steps of same type (they can be horizontal)
+    const groups: any[][] = [];
+    let currentGroup: any[] = [];
+    let lastType = '';
 
-      if (!component) return;
-
-      const isActive = index === currentStep - 1;
-      const isCompleted = index < currentStep;
-
-      newNodes.push({
-        id: step.componentId,
-        type: 'default',
-        data: {
-          label: (
-            <div style={{ textAlign: 'center', padding: '4px' }}>
-              <div style={{ 
-                fontWeight: 600, 
-                fontSize: '12px',
-                fontFamily: 'JetBrains Mono, monospace',
-                color: 'var(--text)',
-                marginBottom: '4px'
-              }}>
-                {component.name}
-              </div>
-              <div style={{ 
-                fontSize: '10px', 
-                color: 'var(--text3)',
-                fontFamily: 'JetBrains Mono, monospace'
-              }}>
-                {step.functionName}
-              </div>
-              {step.dataTransformation && (
-                <div style={{ 
-                  fontSize: '9px', 
-                  marginTop: '4px',
-                  padding: '2px 6px',
-                  background: 'var(--accent-glow)',
-                  color: 'var(--accent)',
-                  borderRadius: '4px',
-                  fontFamily: 'JetBrains Mono, monospace'
-                }}>
-                  {step.dataTransformation.description}
-                </div>
-              )}
-            </div>
-          ),
-        },
-        position: { x: 150 + index * 250, y: 200 },
-        parentId: server.id,
-        style: {
-          background: isActive
-            ? 'var(--accent-glow)'
-            : isCompleted
-            ? 'var(--green-glow)'
-            : 'var(--bg2)',
-          border: isActive 
-            ? '2px solid var(--accent)' 
-            : isCompleted
-            ? '2px solid var(--green)'
-            : '1px solid var(--border2)',
-          padding: '12px',
-          borderRadius: '10px',
-          minWidth: 180,
-          color: 'var(--text)',
-          boxShadow: isActive 
-            ? '0 0 20px var(--accent-glow)' 
-            : isCompleted
-            ? '0 0 12px var(--green-glow)'
-            : 'none'
-        },
-      });
-
-      if (index > 0) {
-        const prevStep = selectedRoute.flowSteps[index - 1];
-        newEdges.push({
-          id: `e${prevStep.componentId}-${step.componentId}`,
-          source: prevStep.componentId,
-          target: step.componentId,
-          animated: index === currentStep - 1,
-          style: { 
-            stroke: isCompleted ? 'var(--green)' : isActive ? 'var(--accent)' : 'var(--border3)', 
-            strokeWidth: 2 
-          },
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            color: isCompleted ? 'var(--green)' : isActive ? 'var(--accent)' : 'var(--border3)',
-          },
-        });
-      }
-    });
-
-    // Add external service calls
-    server.externalCalls.forEach((call, index) => {
-      const externalNodeId = `external-${call.to}`;
+    steps.forEach((item, index) => {
+      const currentType = item.component?.type || 'unknown';
       
-      if (!newNodes.find(n => n.id === externalNodeId)) {
+      // Start new group if type changes or if it's a critical step (handler, middleware)
+      if (currentType !== lastType || 
+          currentType === 'handler' || 
+          currentType === 'middleware' ||
+          currentGroup.length >= 3) { // Max 3 per row
+        if (currentGroup.length > 0) {
+          groups.push(currentGroup);
+        }
+        currentGroup = [item];
+      } else {
+        currentGroup.push(item);
+      }
+      
+      lastType = currentType;
+    });
+    
+    if (currentGroup.length > 0) {
+      groups.push(currentGroup);
+    }
+
+    // Position nodes based on groups
+    let currentY = startY;
+    
+    groups.forEach((group, groupIndex) => {
+      const groupWidth = group.length * nodeWidth + (group.length - 1) * horizontalGap;
+      const groupStartX = startX + (groupWidth > 600 ? 0 : (600 - groupWidth) / 2);
+      
+      group.forEach((item, indexInGroup) => {
+        const { step, component, index } = item;
+        if (!component) return;
+
+        const isActive = index === currentStep - 1;
+        const isCompleted = index < currentStep;
+        const nodeId = `${selectedRoute.id}-step-${index}`;
+        
+        const kind = KIND_STYLES[component.type] || KIND_STYLES.service;
+        
+        // Calculate position
+        const x = group.length === 1 
+          ? startX + 200 // Center single nodes
+          : groupStartX + indexInGroup * (nodeWidth + horizontalGap);
+        const y = currentY;
+
         newNodes.push({
-          id: externalNodeId,
-          type: 'output',
-          data: { 
+          id: nodeId,
+          type: 'default',
+          data: {
             label: (
-              <div style={{ 
-                fontSize: '11px',
-                fontFamily: 'JetBrains Mono, monospace',
-                color: 'var(--text)'
-              }}>
-                {call.to}
+              <div style={{ padding: '10px 12px' }}>
+                <div style={{
+                  fontSize: '9px',
+                  fontWeight: 600,
+                  letterSpacing: '0.8px',
+                  padding: '3px 7px',
+                  borderRadius: '4px',
+                  display: 'inline-block',
+                  marginBottom: '7px',
+                  background: kind.badgeBg,
+                  color: kind.badge
+                }}>
+                  {kind.label}
+                </div>
+                <div style={{
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: '#1a1a1f',
+                  marginBottom: '4px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}>
+                  {component.name}
+                </div>
+                <div style={{
+                  fontSize: '10px',
+                  color: '#666',
+                  fontFamily: 'monospace',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }}>
+                  {step.functionName}
+                </div>
               </div>
-            )
+            ),
           },
-          position: { x: 150, y: 500 + index * 100 },
-          parentId: server.id,
+          position: { x, y },
           style: {
-            background: 'var(--red-glow)',
-            border: '2px solid var(--red)',
-            color: 'var(--text)',
+            background: isActive ? '#eff6ff' : isCompleted ? '#f0fdf4' : kind.bg,
+            border: isActive 
+              ? '2px solid #378ADD' 
+              : isCompleted 
+              ? '2px solid #639922'
+              : `1px solid ${kind.border}`,
             borderRadius: '8px',
-            padding: '8px 12px'
+            width: nodeWidth,
+            height: nodeHeight,
+            cursor: 'pointer',
+            transition: 'all 0.15s',
+            boxShadow: isActive 
+              ? '0 0 0 3px rgba(59, 130, 246, 0.1)' 
+              : isCompleted
+              ? '0 0 0 3px rgba(34, 197, 94, 0.1)'
+              : 'none'
           },
         });
-      }
 
-      newEdges.push({
-        id: `e${call.from}-${externalNodeId}`,
-        source: call.from,
-        target: externalNodeId,
-        label: `${call.method} ${call.endpoint}`,
-        style: { 
-          stroke: 'var(--red)', 
-          strokeDasharray: '5,5',
-          strokeWidth: 2
-        },
-        labelStyle: {
-          fill: 'var(--text2)',
-          fontSize: '10px',
-          fontFamily: 'JetBrains Mono, monospace'
-        },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: 'var(--red)',
-        },
+        // Create edges
+        if (index > 0) {
+          const prevNodeId = `${selectedRoute.id}-step-${index - 1}`;
+          newEdges.push({
+            id: `${selectedRoute.id}-edge-${index}`,
+            source: prevNodeId,
+            target: nodeId,
+            animated: index === currentStep - 1,
+            type: 'smoothstep',
+            style: {
+              stroke: isCompleted ? '#639922' : isActive ? '#378ADD' : '#cbd5e1',
+              strokeWidth: 2
+            },
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              color: isCompleted ? '#639922' : isActive ? '#378ADD' : '#cbd5e1',
+              width: 20,
+              height: 20
+            },
+          });
+        }
       });
+      
+      // Move to next row
+      currentY += nodeHeight + verticalGap;
     });
 
     setNodes(newNodes);
@@ -235,22 +228,12 @@ export default function FlowVisualizer({
   );
 
   return (
-    <div style={{ 
-      width: '100%', 
+    <div style={{
+      width: '100%',
       height: '100%',
       background: '#fafbfc',
       position: 'relative'
     }}>
-      {/* Subtle dot grid background */}
-      <div style={{
-        position: 'absolute',
-        inset: 0,
-        backgroundImage: 'radial-gradient(circle, #e5e7eb 1px, transparent 1px)',
-        backgroundSize: '24px 24px',
-        pointerEvents: 'none',
-        zIndex: 0
-      }}></div>
-      
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -258,23 +241,60 @@ export default function FlowVisualizer({
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         fitView
-        style={{ background: 'transparent' }}
+        fitViewOptions={{ padding: 0.2, minZoom: 0.5, maxZoom: 1 }}
+        minZoom={0.2}
+        maxZoom={1.5}
         proOptions={{ hideAttribution: true }}
       >
-        <Controls 
-          style={{ 
+        <Controls
+          style={{
             background: 'white',
-            border: '1px solid var(--border2)',
+            border: '1px solid #e5e7eb',
             borderRadius: '8px',
             boxShadow: '0 2px 8px rgba(0,0,0,0.08)'
           }}
         />
-        <Background 
-          color="var(--border)" 
+        <Background
+          color="#e5e7eb"
           gap={24}
-          style={{ background: 'transparent' }}
+          size={1}
         />
       </ReactFlow>
+
+      {/* Legend */}
+      <div style={{
+        position: 'absolute',
+        bottom: '12px',
+        left: '12px',
+        background: 'white',
+        border: '1px solid #e5e7eb',
+        borderRadius: '8px',
+        padding: '10px 12px',
+        display: 'flex',
+        gap: '12px',
+        flexWrap: 'wrap',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+        zIndex: 10
+      }}>
+        {Object.entries(KIND_STYLES).map(([key, style]) => (
+          <div key={key} style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            fontSize: '10px',
+            color: '#666'
+          }}>
+            <div style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '2px',
+              background: style.bg,
+              border: `1px solid ${style.border}`
+            }}></div>
+            {style.label.toLowerCase()}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

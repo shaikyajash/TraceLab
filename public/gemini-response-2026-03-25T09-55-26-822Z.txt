@@ -1,0 +1,1016 @@
+{
+  "servers": [{
+    "id": "explorer-api-server",
+    "name": "Explorer API",
+    "port": 8080,
+    "language": "rust",
+    "routes": [{
+      "id": "get-balances-by-chain-address",
+      "path": "/api/balances/{chain}/{address}",
+      "method": "GET",
+      "handler": "BalancesHandler::getBalances",
+      "examplePayload": {
+        "chain": "evm",
+        "address": "0xDda173bd23b07007394611D789EF789a9Aae5CF5"
+      },
+      "flowSteps": [{
+        "componentId": "route-handler",
+        "functionName": "BalancesHandler::getBalances",
+        "order": 0,
+        "dataTransformation": {
+          "input": "HTTP GET request with path parameters /api/balances/evm/0xDda173bd23b07007394611D789EF789a9Aae5CF5",
+          "output": "{ chain: \"evm\", address: \"0xDda173bd23b07007394611D789EF789a9Aae5CF5\" }",
+          "description": "Extracts 'chain' and 'address' from URL path segments."
+        }
+      }, {
+        "componentId": "balance-batcher",
+        "functionName": "BalanceBatcher::submit_request",
+        "order": 1,
+        "dataTransformation": {
+          "input": "{ chain: \"evm\", address: \"0xDda173bd23b07007394611D789EF789a9Aae5CF5\", app_state: AppState }",
+          "output": "Result<Vec<BalanceInfo>, ApiErrors>",
+          "description": "Submits the balance request to an internal batching queue for deferred or aggregated processing. Returns the fetched balances."
+        }
+      }, {
+        "componentId": "balance-batcher",
+        "functionName": "BalanceBatcher::process_batch_internal",
+        "order": 2,
+        "dataTransformation": {
+          "input": "{ chain: Chain::Evm, requests: Vec<PendingRequest> }",
+          "output": "Dispatches to chain-specific balance fetching functions.",
+          "description": "Internal function that processes a collected batch of balance requests for a specific blockchain, delegating to appropriate fetchers."
+        }
+      }, {
+        "componentId": "balance-batcher",
+        "functionName": "BalanceBatcher::fetch_evm_balances_batch",
+        "order": 3,
+        "dataTransformation": {
+          "input": "{ addresses: Vec<String>, app_state: Arc<AppState> }",
+          "output": "HashMap<String, Vec<BalanceInfo>>",
+          "description": "Fetches EVM-specific assets and RPC endpoints, enriches asset data, then dispatches to `get_evm_balances_batch_via_multicall` for batched fetching."
+        }
+      }, {
+        "componentId": "gardenassets-cache",
+        "functionName": "GardenAssetsCache::get_or_fetch",
+        "order": 4,
+        "dataTransformation": {
+          "input": "{ config: &AppConfig }",
+          "output": "Arc<Vec<Asset>>",
+          "description": "Retrieves cached assets information or fetches them from the Garden API if not available or stale."
+        }
+      }, {
+        "componentId": "ensure-native-token-for-evm-chain",
+        "functionName": "ensure_native_token_for_evm_chain",
+        "order": 5,
+        "dataTransformation": {
+          "input": "{ config: &AppConfig, chain_id: &str, assets: &mut Vec<Asset> }",
+          "output": "assets: Vec<Asset> (potentially modified)",
+          "description": "Ensures the chain's native token (e.g., ETH) is present in the list of assets to be queried for an EVM chain. Modifies the asset list in-place.",
+          "transformsData": true
+        }
+      }, {
+        "componentId": "ensure-seed-for-arbitrum",
+        "functionName": "ensure_seed_for_arbitrum",
+        "order": 6,
+        "dataTransformation": {
+          "input": "{ chain: &str, assets: &mut Vec<Asset> }",
+          "output": "assets: Vec<Asset> (potentially modified)",
+          "description": "Adds the SEED token asset to the list for Arbitrum chains if not already included. Modifies the asset list in-place.",
+          "transformsData": true
+        }
+      }, {
+        "componentId": "get-evm-balances-batch-via-multicall",
+        "functionName": "get_evm_balances_batch_via_multicall",
+        "order": 7,
+        "dataTransformation": {
+          "input": "{ rpc_proxy: &str, chain_alias: &str, chain: &str, multicall_address: Address, addresses: &[String], assets: &[Asset] }",
+          "output": "HashMap<String, Vec<BalanceInfo>>",
+          "description": "Constructs and executes batched multicall RPC requests to an EVM blockchain for multiple addresses and assets to efficiently retrieve balances."
+        }
+      }, {
+        "componentId": "route-handler",
+        "functionName": "BalancesHandler::getBalances",
+        "order": 8,
+        "dataTransformation": {
+          "input": "HashMap<String, Vec<BalanceInfo>>",
+          "output": "JSON response of Vec<BalanceInfo>",
+          "description": "Formats the fetched balances into a JSON array of BalanceInfo objects for the API response."
+        }
+      }]
+    }, {
+      "id": "get-asset-info-by-chain-address",
+      "path": "/api/assets/info/{chain}/{atomic_swap_address}",
+      "method": "GET",
+      "handler": "AssetsHandler::getAssetInfo",
+      "examplePayload": {
+        "chain": "citrea_testnet",
+        "atomic_swap_address": "0xad9d14ca82d9bf97fff745ffc7d48172a1c0969e"
+      },
+      "flowSteps": [{
+        "componentId": "route-handler",
+        "functionName": "AssetsHandler::getAssetInfo",
+        "order": 0,
+        "dataTransformation": {
+          "input": "HTTP GET request with path parameters /api/assets/info/citrea_testnet/0xad9d14ca82d9bf97fff745ffc7d48172a1c0969e",
+          "output": "{ chain: \"citrea_testnet\", atomic_swap_address: \"0xad9d14ca82d9bf97fff745ffc7d48172a1c0969e\" }",
+          "description": "Extracts 'chain' and 'atomic_swap_address' from URL path segments."
+        }
+      }, {
+        "componentId": "assetsinfo-provider",
+        "functionName": "AssetsInfoProvider::get_decimals",
+        "order": 1,
+        "dataTransformation": {
+          "input": "{ chain: String, atomic_swap_address: String, token_address: Option<String> }",
+          "output": "Option<u8>",
+          "description": "Retrieves asset decimals from cache. If not found, it attempts to fetch them from a contract via RPC and caches the result."
+        }
+      }, {
+        "componentId": "assetsinfo-provider",
+        "functionName": "AssetsInfoProvider::cache.get",
+        "order": 2,
+        "dataTransformation": {
+          "input": "(chain.to_lowercase(), atomic_swap_address.to_lowercase())",
+          "output": "Option<AssetInfo>",
+          "description": "Checks the internal Moka cache for existing asset information based on chain and atomic swap address."
+        }
+      }, {
+        "componentId": "chain-config-service",
+        "functionName": "ChainConfig::chain_to_type.get",
+        "order": 3,
+        "dataTransformation": {
+          "input": "chain: String",
+          "output": "CHAINS enum value (e.g., CHAINS::EthDecimalFetcher)",
+          "description": "Determines the appropriate blockchain type and corresponding decimal fetcher to use for the given chain."
+        }
+      }, {
+        "componentId": "eth-decimal-fetcher",
+        "functionName": "EthDecimalFetcher::get_decimals",
+        "order": 4,
+        "dataTransformation": {
+          "input": "{ rpc_proxy: &str, chain: &str, token_address: &str }",
+          "output": "Result<u8, Box<dyn Error>>",
+          "description": "Makes an RPC call to an EVM contract (ERC20 standard) to retrieve the token's decimal precision."
+        }
+      }, {
+        "componentId": "assetsinfo-provider",
+        "functionName": "AssetsInfoProvider::cache.insert",
+        "order": 5,
+        "dataTransformation": {
+          "input": "(chain.to_lowercase(), atomic_swap_address.to_lowercase()), AssetInfo",
+          "output": "()",
+          "description": "Stores the newly fetched asset information (including decimals) into the AssetsInfoProvider's cache for future use."
+        }
+      }, {
+        "componentId": "route-handler",
+        "functionName": "AssetsHandler::getAssetInfo",
+        "order": 6,
+        "dataTransformation": {
+          "input": "Option<u8>",
+          "output": "JSON response { \"decimals\": 18 }",
+          "description": "Formats the fetched decimals into a JSON object for the API response."
+        }
+      }]
+    }, {
+      "id": "post-cache-warmup-garden-assets",
+      "path": "/api/cache/warmup/garden-assets",
+      "method": "POST",
+      "handler": "CacheWarmupHandler::warmupGardenAssets",
+      "examplePayload": {},
+      "flowSteps": [{
+        "componentId": "route-handler",
+        "functionName": "CacheWarmupHandler::warmupGardenAssets",
+        "order": 0,
+        "dataTransformation": {
+          "input": "HTTP POST request with empty body",
+          "output": "Triggers cache warm-up process",
+          "description": "Receives the request and initiates the asynchronous process to refresh the Garden assets cache."
+        }
+      }, {
+        "componentId": "gardenassets-cache",
+        "functionName": "GardenAssetsCache::warm_cache",
+        "order": 1,
+        "dataTransformation": {
+          "input": "{ config: &AppConfig }",
+          "output": "Arc<Vec<Asset>>",
+          "description": "Orchestrates the fetching of asset data from the Garden API and updates the internal assets cache."
+        }
+      }, {
+        "componentId": "fetch-assets-util",
+        "functionName": "fetch_assets",
+        "order": 2,
+        "dataTransformation": {
+          "input": "garden_api_base_url: &str",
+          "output": "Vec<Asset>",
+          "description": "Utility function that directly makes an HTTP request to the Garden API to retrieve raw asset data."
+        }
+      }, {
+        "componentId": "assetsinfo-provider",
+        "functionName": "AssetsInfoProvider::warm_cache",
+        "order": 3,
+        "dataTransformation": {
+          "input": "()",
+          "output": "()",
+          "description": "Triggers the update of the AssetsInfoProvider's cache, including fetching legacy assets from CDN and current assets from Garden API."
+        }
+      }, {
+        "componentId": "assetsinfo-provider",
+        "functionName": "AssetsInfoProvider::build_legacy_assets",
+        "order": 4,
+        "dataTransformation": {
+          "input": "cdn_url: String",
+          "output": "()",
+          "description": "Fetches legacy asset information from a configured CDN URL and populates the AssetsInfoProvider's cache."
+        }
+      }, {
+        "componentId": "assetsinfo-provider",
+        "functionName": "AssetsInfoProvider::fetch_and_update_cache",
+        "order": 5,
+        "dataTransformation": {
+          "input": "()",
+          "output": "()",
+          "description": "Fetches the latest asset information from the Garden API and updates the AssetsInfoProvider's cache with this data."
+        }
+      }, {
+        "componentId": "assetsinfo-provider",
+        "functionName": "AssetsInfoProvider::fetch_and_parse_assets",
+        "order": 6,
+        "dataTransformation": {
+          "input": "()",
+          "output": "Vec<AssetInfo>",
+          "description": "Makes an HTTP request to the Garden API, retrieves asset data, and parses it into a vector of AssetInfo objects."
+        }
+      }, {
+        "componentId": "route-handler",
+        "functionName": "CacheWarmupHandler::warmupGardenAssets",
+        "order": 7,
+        "dataTransformation": {
+          "input": "Arc<Vec<Asset>>",
+          "output": "JSON response { \"status\": \"cache warmed up\" }",
+          "description": "Returns a success status confirming that the cache warm-up process has been initiated or completed."
+        }
+      }]
+    }],
+    "internalComponents": [{
+      "id": "network-enum",
+      "name": "Network",
+      "type": "util",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\appconfig.rs",
+      "functions": [{
+        "name": "as_str",
+        "params": ["&self"],
+        "returns": "&'static str",
+        "transformsData": false
+      }, {
+        "name": "is_mainnet",
+        "params": ["&self"],
+        "returns": "bool",
+        "transformsData": false
+      }, {
+        "name": "is_testnet",
+        "params": ["&self"],
+        "returns": "bool",
+        "transformsData": false
+      }, {
+        "name": "from_str",
+        "params": ["s: &str"],
+        "returns": "Result<Self, String>",
+        "transformsData": true
+      }, {
+        "name": "deserialize",
+        "params": ["deserializer: D"],
+        "returns": "Result<Self, D::Error>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "swapkit-config",
+      "name": "SwapkitConfig",
+      "type": "config",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\appconfig.rs",
+      "functions": []
+    }, {
+      "id": "integratorkeymanager-config",
+      "name": "IntegratorKeyManagerConfig",
+      "type": "config",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\appconfig.rs",
+      "functions": []
+    }, {
+      "id": "secrets-config",
+      "name": "SecretsConfig",
+      "type": "config",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\appconfig.rs",
+      "functions": []
+    }, {
+      "id": "rpcurls-config",
+      "name": "RpcUrlsConfig",
+      "type": "config",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\appconfig.rs",
+      "functions": []
+    }, {
+      "id": "evm-config",
+      "name": "EvmConfig",
+      "type": "config",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\appconfig.rs",
+      "functions": []
+    }, {
+      "id": "balancebatcher-config",
+      "name": "BalanceBatcherConfig",
+      "type": "config",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\appconfig.rs",
+      "functions": [{
+        "name": "default",
+        "params": [],
+        "returns": "Self",
+        "transformsData": false
+      }]
+    }, {
+      "id": "nativeasset-config",
+      "name": "NativeAssetConfig",
+      "type": "config",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\appconfig.rs",
+      "functions": []
+    }, {
+      "id": "multicall-config",
+      "name": "MulticallConfig",
+      "type": "config",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\appconfig.rs",
+      "functions": []
+    }, {
+      "id": "chain-config-app",
+      "name": "ChainConfig",
+      "type": "config",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\appconfig.rs",
+      "functions": []
+    }, {
+      "id": "app-config",
+      "name": "AppConfig",
+      "type": "config-manager",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\appconfig.rs",
+      "functions": [{
+        "name": "new",
+        "params": ["path: &str"],
+        "returns": "Self",
+        "transformsData": true
+      }, {
+        "name": "resolve_chain_key_for_family",
+        "params": ["&self", "family: &str"],
+        "returns": "Result<String, String>",
+        "transformsData": false
+      }, {
+        "name": "get_native_asset",
+        "params": ["&self", "chain_id: &str"],
+        "returns": "Option<&NativeAssetConfig>",
+        "transformsData": false
+      }, {
+        "name": "get_evm_multicall3_address",
+        "params": ["&self", "chain_id: &str"],
+        "returns": "Option<String>",
+        "transformsData": false
+      }, {
+        "name": "get_starknet_multicall_address",
+        "params": ["&self", "chain_id: &str"],
+        "returns": "Option<String>",
+        "transformsData": false
+      }]
+    }, {
+      "id": "gardenassets-cache",
+      "name": "GardenAssetsCache",
+      "type": "caching",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\appstate.rs",
+      "functions": [{
+        "name": "new",
+        "params": [],
+        "returns": "Self",
+        "transformsData": false
+      }, {
+        "name": "get_or_fetch",
+        "params": ["&self", "config: &AppConfig"],
+        "returns": "Result<Arc<Vec<Asset>>, ApiErrors>",
+        "transformsData": true
+      }, {
+        "name": "warm_cache",
+        "params": ["&self", "config: &AppConfig"],
+        "returns": "Arc<Vec<Asset>>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "app-state",
+      "name": "AppState",
+      "type": "dependency-container",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\appstate.rs",
+      "functions": [{
+        "name": "new",
+        "params": ["db_provider: DBProvider", "config: Arc<AppConfig>", "asset_info_provider: Arc<AssetsInfoProvider>", "competitor_stats: Arc<CompetitorStats>", "metrics_cache: Arc<Metrics>", "integrator_key_service: Arc<IntegratorsKeyService>", "balance_batcher: Arc<BalanceBatcher>", "garden_assets_cache: Arc<GardenAssetsCache>"],
+        "returns": "Self",
+        "transformsData": false
+      }]
+    }, {
+      "id": "token-info",
+      "name": "TokenInfo",
+      "type": "data-model",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\asset_info_provider.rs",
+      "functions": [{
+        "name": "default",
+        "params": [],
+        "returns": "Self",
+        "transformsData": false
+      }]
+    }, {
+      "id": "htlc-info",
+      "name": "HtlcInfo",
+      "type": "data-model",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\asset_info_provider.rs",
+      "functions": [{
+        "name": "default",
+        "params": [],
+        "returns": "Self",
+        "transformsData": false
+      }]
+    }, {
+      "id": "asset-info",
+      "name": "AssetInfo",
+      "type": "data-model",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\asset_info_provider.rs",
+      "functions": [{
+        "name": "default",
+        "params": [],
+        "returns": "Self",
+        "transformsData": false
+      }]
+    }, {
+      "id": "asset-config-provider",
+      "name": "AssetConfig",
+      "type": "data-model",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\asset_info_provider.rs",
+      "functions": []
+    }, {
+      "id": "assetsinfo-provider",
+      "name": "AssetsInfoProvider",
+      "type": "service",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\asset_info_provider.rs",
+      "functions": [{
+        "name": "new",
+        "params": ["config: Arc<AppConfig>"],
+        "returns": "Self",
+        "transformsData": false
+      }, {
+        "name": "build_legacy_assets",
+        "params": ["&self", "cdn_url: String"],
+        "returns": "()",
+        "transformsData": true
+      }, {
+        "name": "fetch_and_parse_assets",
+        "params": ["&self"],
+        "returns": "Vec<AssetInfo>",
+        "transformsData": true
+      }, {
+        "name": "fetch_and_update_cache",
+        "params": ["&self"],
+        "returns": "()",
+        "transformsData": true
+      }, {
+        "name": "get_token_address",
+        "params": ["&self", "chain: String", "atomic_swap_address: String"],
+        "returns": "Option<String>",
+        "transformsData": false
+      }, {
+        "name": "from_contract",
+        "params": ["&self", "chain: &str", "token_address: &str"],
+        "returns": "Result<u8, Box<dyn Error>>",
+        "transformsData": true
+      }, {
+        "name": "get_decimals",
+        "params": ["&self", "(chain, atomic_swap_address, token_address): (String, String, Option<String>)"],
+        "returns": "Option<u8>",
+        "transformsData": true
+      }, {
+        "name": "from_asset_id",
+        "params": ["&self", "id: String"],
+        "returns": "Option<(String, String)>",
+        "transformsData": false
+      }, {
+        "name": "warm_cache",
+        "params": ["&self"],
+        "returns": "()",
+        "transformsData": true
+      }]
+    }, {
+      "id": "get-chain-name-from-id",
+      "name": "get_chain_name_from_id",
+      "type": "util",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\asset_info_provider.rs",
+      "functions": [{
+        "name": "get_chain_name_from_id",
+        "params": ["id: &str"],
+        "returns": "String",
+        "transformsData": false
+      }]
+    }, {
+      "id": "chains-enum",
+      "name": "CHAINS",
+      "type": "enum",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\chains.rs",
+      "functions": []
+    }, {
+      "id": "chain-config-service",
+      "name": "ChainConfig",
+      "type": "service",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\chains.rs",
+      "functions": [{
+        "name": "init",
+        "params": ["settings: Arc<AppConfig>"],
+        "returns": "Self",
+        "transformsData": true
+      }, {
+        "name": "warm_cache",
+        "params": ["&self"],
+        "returns": "()",
+        "transformsData": true
+      }]
+    }, {
+      "id": "decimal-fetcher-trait",
+      "name": "DecimalFetcher",
+      "type": "trait",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\decimal_fetcher.rs",
+      "functions": [{
+        "name": "get_decimals",
+        "params": ["rpc_proxy: &str", "chain: &str", "address: &str"],
+        "returns": "Result<u8, Box<dyn Error>>",
+        "transformsData": true
+      }, {
+        "name": "get_default_decimals",
+        "params": [],
+        "returns": "u8",
+        "transformsData": false
+      }]
+    }, {
+      "id": "bitcoin-decimal-fetcher",
+      "name": "BitcoinDecimalFetcher",
+      "type": "service",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\decimal_fetcher.rs",
+      "functions": [{
+        "name": "get_decimals",
+        "params": ["_rpc_proxy: &str", "_chain: &str", "_address: &str"],
+        "returns": "Result<u8, Box<dyn Error>>",
+        "transformsData": false
+      }, {
+        "name": "get_default_decimals",
+        "params": [],
+        "returns": "u8",
+        "transformsData": false
+      }]
+    }, {
+      "id": "eth-decimal-fetcher",
+      "name": "EthDecimalFetcher",
+      "type": "service",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\decimal_fetcher.rs",
+      "functions": [{
+        "name": "get_decimals",
+        "params": ["rpc_proxy: &str", "chain: &str", "token_address: &str"],
+        "returns": "Result<u8, Box<dyn Error>>",
+        "transformsData": true
+      }, {
+        "name": "get_default_decimals",
+        "params": [],
+        "returns": "u8",
+        "transformsData": false
+      }]
+    }, {
+      "id": "sol-decimal-fetcher",
+      "name": "SolDecimalFetcher",
+      "type": "service",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\decimal_fetcher.rs",
+      "functions": [{
+        "name": "get_decimals",
+        "params": ["_rpc_proxy: &str", "_chain: &str", "_address: &str"],
+        "returns": "Result<u8, Box<dyn Error>>",
+        "transformsData": false
+      }, {
+        "name": "get_default_decimals",
+        "params": [],
+        "returns": "u8",
+        "transformsData": false
+      }]
+    }, {
+      "id": "starknet-decimal-fetcher",
+      "name": "StarknetDecimalFetcher",
+      "type": "service",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\decimal_fetcher.rs",
+      "functions": [{
+        "name": "get_decimals",
+        "params": ["rpc_proxy: &str", "chain: &str", "token_address: &str"],
+        "returns": "Result<u8, Box<dyn Error>>",
+        "transformsData": true
+      }, {
+        "name": "get_default_decimals",
+        "params": [],
+        "returns": "u8",
+        "transformsData": false
+      }]
+    }, {
+      "id": "sui-decimal-fetcher",
+      "name": "SuiDecimalFetcher",
+      "type": "service",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\assets_info_provider\\decimal_fetcher.rs",
+      "functions": [{
+        "name": "get_decimals",
+        "params": ["_rpc_proxy: &str", "_chain: &str", "_token_address: &str"],
+        "returns": "Result<u8, Box<dyn Error>>",
+        "transformsData": false
+      }, {
+        "name": "get_default_decimals",
+        "params": [],
+        "returns": "u8",
+        "transformsData": false
+      }]
+    }, {
+      "id": "chain-enum-balance",
+      "name": "Chain",
+      "type": "enum",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\batcher.rs",
+      "functions": [{
+        "name": "from_str",
+        "params": ["s: &str"],
+        "returns": "Option<Self>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "pending-request",
+      "name": "PendingRequest",
+      "type": "data-model",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\batcher.rs",
+      "functions": []
+    }, {
+      "id": "batch-queue",
+      "name": "BatchQueue",
+      "type": "data-model",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\batcher.rs",
+      "functions": [{
+        "name": "new",
+        "params": [],
+        "returns": "Self",
+        "transformsData": false
+      }]
+    }, {
+      "id": "balance-batcher",
+      "name": "BalanceBatcher",
+      "type": "service",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\batcher.rs",
+      "functions": [{
+        "name": "new",
+        "params": ["batch_window_ms: u64", "max_batch_size: usize"],
+        "returns": "Self",
+        "transformsData": false
+      }, {
+        "name": "submit_request",
+        "params": ["&self", "chain: Chain", "address: String", "app_state: Arc<AppState>"],
+        "returns": "Result<Vec<BalanceInfo>, ApiErrors>",
+        "transformsData": true
+      }, {
+        "name": "process_batch",
+        "params": ["chain: Chain", "requests: Vec<PendingRequest>", "app_state: Arc<AppState>"],
+        "returns": "()",
+        "transformsData": true
+      }, {
+        "name": "process_batch_internal",
+        "params": ["chain: Chain", "requests: Vec<PendingRequest>", "app_state: Arc<AppState>"],
+        "returns": "()",
+        "transformsData": true
+      }, {
+        "name": "fetch_evm_balances_batch",
+        "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
+        "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
+        "transformsData": true
+      }, {
+        "name": "fetch_solana_balances_batch",
+        "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
+        "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
+        "transformsData": true
+      }, {
+        "name": "fetch_starknet_balances_batch",
+        "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
+        "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
+        "transformsData": true
+      }, {
+        "name": "fetch_bitcoin_balances_batch",
+        "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
+        "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
+        "transformsData": true
+      }, {
+        "name": "fetch_tron_balances_batch",
+        "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
+        "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
+        "transformsData": true
+      }, {
+        "name": "fetch_xrpl_balances_batch",
+        "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
+        "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
+        "transformsData": true
+      }, {
+        "name": "fetch_spark_balances_batch",
+        "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
+        "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
+        "transformsData": true
+      }, {
+        "name": "fetch_litecoin_balances_batch",
+        "params": ["addresses: Vec<String>", "app_state: Arc<AppState>"],
+        "returns": "Result<HashMap<String, Vec<BalanceInfo>>, ApiErrors>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "detect-address-type",
+      "name": "detect_address_type",
+      "type": "util",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\bitcoin.rs",
+      "functions": [{
+        "name": "detect_address_type",
+        "params": ["address: &str"],
+        "returns": "Result<(AddressType, BitcoinNetwork), Box<dyn std::error::Error + Send + Sync>>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "estimate-transaction-size",
+      "name": "estimate_transaction_size",
+      "type": "util",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\bitcoin.rs",
+      "functions": [{
+        "name": "estimate_transaction_size",
+        "params": ["address_type: AddressType", "utxo_count: usize"],
+        "returns": "usize",
+        "transformsData": false
+      }]
+    }, {
+      "id": "get-fee-rate",
+      "name": "get_fee_rate",
+      "type": "util",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\bitcoin.rs",
+      "functions": [{
+        "name": "get_fee_rate",
+        "params": ["base_url: &str"],
+        "returns": "Result<u64, Box<dyn std::error::Error + Send + Sync>>",
+        "transformsData": false
+      }]
+    }, {
+      "id": "get-balance-from-mempool",
+      "name": "get_balance_from_mempool",
+      "type": "util",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\bitcoin.rs",
+      "functions": [{
+        "name": "get_balance_from_mempool",
+        "params": ["address: &str", "base_url: &str"],
+        "returns": "Result<(u128, usize), Box<dyn std::error::Error + Send + Sync>>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "get-balance-from-blockcypher",
+      "name": "get_balance_from_blockcypher",
+      "type": "util",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\bitcoin.rs",
+      "functions": [{
+        "name": "get_balance_from_blockcypher",
+        "params": ["address: &str", "base_url: &str"],
+        "returns": "Result<(u128, usize), Box<dyn std::error::Error + Send + Sync>>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "get-balance-from-blockchair",
+      "name": "get_balance_from_blockchair",
+      "type": "util",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\bitcoin.rs",
+      "functions": [{
+        "name": "get_balance_from_blockchair",
+        "params": ["address: &str", "base_url: &str"],
+        "returns": "Result<(u128, usize), Box<dyn std::error::Error + Send + Sync>>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "get-bitcoin-balance",
+      "name": "get_bitcoin_balance",
+      "type": "util",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\bitcoin.rs",
+      "functions": [{
+        "name": "get_bitcoin_balance",
+        "params": ["address: &str", "mempool_base_url: &str", "blockcypher_base_url: &str", "blockchair_base_url: &str"],
+        "returns": "Result<(u128, usize), Box<dyn std::error::Error + Send + Sync>>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "calculate-spendable-balance",
+      "name": "calculate_spendable_balance",
+      "type": "util",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\bitcoin.rs",
+      "functions": [{
+        "name": "calculate_spendable_balance",
+        "params": ["address: &str", "balance: u128", "utxo_count: usize", "bitcoin_rpc: &str"],
+        "returns": "Result<u128, Box<dyn std::error::Error + Send + Sync>>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "get-bitcoin-balances-batch",
+      "name": "get_bitcoin_balances_batch",
+      "type": "service",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\bitcoin.rs",
+      "functions": [{
+        "name": "get_bitcoin_balances_batch",
+        "params": ["bitcoin_rpcs: &[String]", "blockcypher_urls: &[String]", "blockchair_urls: &[String]", "addresses: &[String]", "network: Network"],
+        "returns": "Result<std::collections::HashMap<String, Vec<BalanceInfo>>, Box<dyn std::error::Error + Send + Sync>>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "is-evm-native-asset",
+      "name": "is_evm_native_asset",
+      "type": "util",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\evm.rs",
+      "functions": [{
+        "name": "is_evm_native_asset",
+        "params": ["asset: &Asset"],
+        "returns": "bool",
+        "transformsData": false
+      }]
+    }, {
+      "id": "ensure-native-token-for-evm-chain",
+      "name": "ensure_native_token_for_evm_chain",
+      "type": "util",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\evm.rs",
+      "functions": [{
+        "name": "ensure_native_token_for_evm_chain",
+        "params": ["config: &AppConfig", "chain_id: &str", "assets: &mut Vec<Asset>"],
+        "returns": "()",
+        "transformsData": true
+      }]
+    }, {
+      "id": "ensure-seed-for-arbitrum",
+      "name": "ensure_seed_for_arbitrum",
+      "type": "util",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\evm.rs",
+      "functions": [{
+        "name": "ensure_seed_for_arbitrum",
+        "params": ["chain: &str", "assets: &mut Vec<Asset>"],
+        "returns": "()",
+        "transformsData": true
+      }]
+    }, {
+      "id": "get-evm-balances-via-multicall",
+      "name": "get_evm_balances_via_multicall",
+      "type": "service",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\evm.rs",
+      "functions": [{
+        "name": "get_evm_balances_via_multicall",
+        "params": ["rpc_proxy: &str", "chain_alias: &str", "chain: &str", "multicall_address: Address", "address: &str", "assets: &[Asset]"],
+        "returns": "Result<Vec<BalanceInfo>, Box<dyn std::error::Error + Send + Sync>>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "get-evm-balances-batch-via-multicall",
+      "name": "get_evm_balances_batch_via_multicall",
+      "type": "service",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\evm.rs",
+      "functions": [{
+        "name": "get_evm_balances_batch_via_multicall",
+        "params": ["rpc_proxy: &str", "chain_alias: &str", "chain: &str", "multicall_address: Address", "addresses: &[String]", "assets: &[Asset]"],
+        "returns": "Result<std::collections::HashMap<String, Vec<BalanceInfo>>, Box<dyn std::error::Error + Send + Sync>>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "get-litecoin-balances-batch",
+      "name": "get_litecoin_balances_batch",
+      "type": "service",
+      "filePath": "D:\\new downloads\\explorer-api-stage\\explorer-api\\src\\balance\\litecoin.rs",
+      "functions": [{
+        "name": "get_litecoin_balances_batch",
+        "params": ["litecoin_rpcs: &[String]", "addresses: &[String]", "network: Network"],
+        "returns": "Result<std::collections::HashMap<String, Vec<BalanceInfo>>, Box<dyn std::error::Error + Send + Sync>>",
+        "transformsData": true
+      }]
+    }, {
+      "id": "fetch-assets-util",
+      "name": "fetch_assets",
+      "type": "util",
+      "filePath": "N/A (inferred from usage)",
+      "functions": [{
+        "name": "fetch_assets",
+        "params": ["garden_api_base_url: &str"],
+        "returns": "Result<Vec<Asset>, Error>",
+        "transformsData": true
+      }]
+    }],
+    "externalCalls": [{
+      "from": "gardenassets-cache",
+      "to": "garden-api",
+      "method": "GET",
+      "endpoint": "/v2/assets"
+    }, {
+      "from": "assetsinfo-provider",
+      "to": "cdn-service",
+      "method": "GET",
+      "endpoint": "/LEGACY_ASSETS_PATH"
+    }, {
+      "from": "assetsinfo-provider",
+      "to": "garden-api",
+      "method": "GET",
+      "endpoint": "/v2/assets"
+    }, {
+      "from": "eth-decimal-fetcher",
+      "to": "rpc-proxy-service",
+      "method": "POST",
+      "endpoint": "/{chain}"
+    }, {
+      "from": "starknet-decimal-fetcher",
+      "to": "rpc-proxy-service",
+      "method": "POST",
+      "endpoint": "/{chain}"
+    }, {
+      "from": "get-fee-rate",
+      "to": "bitcoin-mempool-api",
+      "method": "GET",
+      "endpoint": "/v1/fees/recommended"
+    }, {
+      "from": "get-balance-from-mempool",
+      "to": "bitcoin-mempool-api",
+      "method": "GET",
+      "endpoint": "/address/{address}/utxo"
+    }, {
+      "from": "get-balance-from-blockcypher",
+      "to": "bitcoin-blockcypher-api",
+      "method": "GET",
+      "endpoint": "/addrs/{address}"
+    }, {
+      "from": "get-balance-from-blockchair",
+      "to": "bitcoin-blockchair-api",
+      "method": "GET",
+      "endpoint": "/bitcoin/addresses/balances?addresses={address}"
+    }, {
+      "from": "balance-batcher",
+      "to": "rpc-proxy-service",
+      "method": "POST",
+      "endpoint": "/{chain_alias}"
+    }, {
+      "from": "balance-batcher",
+      "to": "various-chain-rpcs",
+      "method": "POST",
+      "endpoint": "/solana"
+    }, {
+      "from": "balance-batcher",
+      "to": "various-chain-rpcs",
+      "method": "POST",
+      "endpoint": "/starknet"
+    }, {
+      "from": "balance-batcher",
+      "to": "various-chain-rpcs",
+      "method": "POST",
+      "endpoint": "/tron"
+    }, {
+      "from": "balance-batcher",
+      "to": "various-chain-rpcs",
+      "method": "POST",
+      "endpoint": "/xrpl"
+    }, {
+      "from": "balance-batcher",
+      "to": "various-chain-rpcs",
+      "method": "POST",
+      "endpoint": "/spark"
+    }, {
+      "from": "balance-batcher",
+      "to": "various-chain-rpcs",
+      "method": "POST",
+      "endpoint": "/litecoin"
+    }, {
+      "from": "fetch-assets-util",
+      "to": "garden-api",
+      "method": "GET",
+      "endpoint": "/v2/assets"
+    }]
+  }],
+  "externalServices": [{
+    "id": "garden-api",
+    "name": "Garden API",
+    "baseUrl": "https://api.garden.io"
+  }, {
+    "id": "rpc-proxy-service",
+    "name": "RPC Proxy Service",
+    "baseUrl": "https://rpc.proxy.io"
+  }, {
+    "id": "cdn-service",
+    "name": "CDN Service",
+    "baseUrl": "https://cdn.example.com"
+  }, {
+    "id": "integrator-key-manager-service",
+    "name": "Integrator Key Manager Service",
+    "baseUrl": "https://keys.example.com"
+  }, {
+    "id": "bitcoin-mempool-api",
+    "name": "Bitcoin Mempool API",
+    "baseUrl": "https://mempool.space/api"
+  }, {
+    "id": "bitcoin-blockcypher-api",
+    "name": "Bitcoin BlockCypher API",
+    "baseUrl": "https://api.blockcypher.com/v1/btc/main"
+  }, {
+    "id": "bitcoin-blockchair-api",
+    "name": "Bitcoin Blockchair API",
+    "baseUrl": "https://api.blockchair.com"
+  }, {
+    "id": "various-chain-rpcs",
+    "name": "Various Chain RPCs",
+    "baseUrl": "Config-driven"
+  }]
+}
