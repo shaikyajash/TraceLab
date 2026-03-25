@@ -1,5 +1,13 @@
 {
   "permissions": {
-    "allow": ["Bash(npx tsx -e \":*)"]
+    "allow": [
+      "Bash(npx tsx -e \":*)",
+      "Bash(gh pr:*)",
+      "Bash(gh api:*)",
+      "Read(//tmp/**)",
+      "Read(//private/tmp/**)",
+      "Bash(for font:*)",
+      "Bash(do gh:*)"
+    ]
   }
 }
