@@ -118,7 +118,10 @@ export async function POST(request: NextRequest) {
                 completedServices: completed,
                 totalServices: total,
               });
-              const result = await analyzeService(service);
+              const result = await analyzeService(service, {
+                workspacePath,
+                onProgress: (msg) => send({ phase: "analyzing", message: `[${service.name}] ${msg}` }),
+              });
               completed++;
               send({
                 phase: "analyzing",

@@ -112,7 +112,9 @@ export interface ExternalPackage {
 export type ScanPhase =
   | "discovering"
   | "reading"
+  | "resolving_types"
   | "analyzing"
+  | "validating"
   | "cross_service"
   | "merging"
   | "writing"

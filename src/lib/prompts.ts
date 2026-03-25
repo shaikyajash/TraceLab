@@ -1,6 +1,13 @@
 import { DiscoveredService } from "./schema";
+import {
+  type ResolvedExternalType,
+  formatExternalTypesForPrompt,
+} from "./external-types";
 
-export function buildPerServicePrompt(service: DiscoveredService): {
+export function buildPerServicePrompt(
+  service: DiscoveredService,
+  externalTypes?: ResolvedExternalType[],
+): {
   system: string;
   user: string;
 } {
@@ -9,6 +16,10 @@ export function buildPerServicePrompt(service: DiscoveredService): {
       (f) => `--- FILE: ${f.relativePath} ---\n${f.content}\n--- END FILE ---`,
     )
     .join("\n\n");
+
+  const externalTypesContext = externalTypes?.length
+    ? formatExternalTypesForPrompt(externalTypes)
+    : "";
 
   const system = `You are a senior Rust code analyzer that produces structured JSON describing a service's architecture, data flow, and execution paths.
 
@@ -73,6 +84,37 @@ Notable crates used:
   crate, used_in_services, purpose
 
 ═══════════════════════════════════════════
+SECTION 4.5: SERDE AWARENESS (critical for JSON correctness)
+═══════════════════════════════════════════
+
+Rust's serde determines how types serialize/deserialize to JSON. You MUST follow these rules:
+
+RENAME RULES:
+- #[serde(rename_all = "lowercase")] → JSON values are all-lowercase: "bitcoin" not "Bitcoin"
+- #[serde(rename_all = "UPPERCASE")] → JSON values are all-uppercase
+- #[serde(rename_all = "camelCase")] → JSON values are camelCase
+- #[serde(rename_all = "snake_case")] → JSON values are snake_case
+- #[serde(rename = "custom")] on a variant → that variant uses "custom" in JSON
+
+DESERIALIZATION BEHAVIOR:
+- If a JSON request body is deserialized into a struct containing an enum field, and the
+  JSON value does NOT match any known variant (after applying rename rules), serde will
+  FAIL deserialization. This causes an error response (typically 400 Bad Request).
+- This deserialization failure is a REAL execution path. You MUST create a trace for it.
+
+ENUM NODES:
+- For every enum that participates in request/response deserialization, include it as a
+  node with kind="enum". List ALL variants in the fields array with their serde-serialized
+  JSON values. Include the full source_code with derive macros and serde attributes.
+- If the enum is from an external crate but is used in request/response types, STILL include
+  it as a node. The scanner may provide its definition in the EXTERNAL TYPE DEFINITIONS section.
+
+EXAMPLE PAYLOADS:
+- All enum values in example_payload fields MUST use the serde-serialized form.
+  e.g. if ChainType has #[serde(rename_all = "lowercase")], use "bitcoin" not "Bitcoin".
+- NEVER guess enum variants. Use only variants from the actual source code or external type definitions.
+
+═══════════════════════════════════════════
 SECTION 5: TRACES (critical — read carefully)
 ═══════════════════════════════════════════
 
@@ -115,6 +157,13 @@ TRACE RULES:
 - If a path hits the SAME components but with different data, it does NOT need a separate trace (same execution path).
 - Simple endpoints with no branching (health checks, version endpoints) get exactly one trace.
 - Order traces from most common/happy path first.
+- DESERIALIZATION FAILURES: If a route_handler deserializes the request body via serde
+  (e.g. serde_json::from_value, Json<T> extractor) and the body could contain an enum field
+  with an unknown/invalid value, add a trace for "Invalid request — deserialization failure".
+  This trace is short (typically: middleware → route_handler → 400 response) because the
+  handler's match on deserialization result hits the Err(_) arm immediately.
+- WILDCARD MATCH ARMS: If the route_handler has a wildcard _ => arm (e.g. for auth/action
+  mismatch), that is a distinct trace (typically "Unauthorized — mismatch").
 
 ═══════════════════════════════════════════
 OUTPUT JSON SCHEMA (all fields required unless noted)
@@ -191,11 +240,15 @@ OUTPUT JSON SCHEMA (all fields required unless noted)
   ]
 }`;
 
+  const externalTypesSection = externalTypesContext
+    ? `\n\n═══════════════════════════════════════════\nEXTERNAL TYPE DEFINITIONS (resolved from dependency crates)\n═══════════════════════════════════════════\n\nThe following types are used in this service but defined in external crates.\nUse these EXACT definitions for enum variants, struct fields, and serde behavior.\nDo NOT guess variants — only use what is listed here.\n\n${externalTypesContext}`
+    : "";
+
   const user = `Analyze the following Rust service "${service.name}" (located at "${service.path}") and extract all components, data flow edges, mutations, external packages, and execution traces.
 
 Pay special attention to branching logic — match arms, if/else chains, boolean flags, Option/Result checks, type-based dispatch — anywhere different input values cause different components to be called. Each distinct path needs its own trace.
 
-${fileList}`;
+${fileList}${externalTypesSection}`;
 
   return { system, user };
 }
