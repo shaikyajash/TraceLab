@@ -148,9 +148,9 @@ export default function Sidebar(props: SidebarProps) {
       setTimeout(() => {
         inspectorRef.current?.scrollIntoView({ 
           behavior: "smooth", 
-          block: "nearest"
+          block: "start"
         });
-      }, 300); // give time for transition to expand
+      }, 310); // give time for transition to expand
     } else {
       setInspectorOpen(false);
     }
@@ -207,7 +207,7 @@ export default function Sidebar(props: SidebarProps) {
           >
             {traceMethod}
           </div>
-          <Select value={traceRouteId || ""} onValueChange={(value: string) => { setTraceRouteId(value || null); clearTrace(); }}>
+          <Select value={traceRouteId || ""} onValueChange={(value: string) => { setTraceRouteId(value || null); clearTrace(); } } >
             <SelectTrigger className="flex-1 bg-[#111114] border-[#2a2a2e] h-auto py-2 px-3 text-white text-[11px] hover:border-[#378ADD] focus:ring-0 focus:ring-offset-0">
               <SelectValue placeholder="select route..." className="text-white" />
             </SelectTrigger>
