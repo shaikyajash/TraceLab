@@ -4,7 +4,8 @@ import { parse as parseTOML } from 'smol-toml';
 import { DiscoveredService } from './schema';
 
 const SKIP_DIRS = new Set(['target', 'node_modules', '.git', '.idea', '.vscode']);
-const MAX_FILE_SIZE = 100 * 1024; // 100KB
+const MAX_FILE_SIZE = 100 * 1024; // 100KB per file
+const MAX_TOTAL_CHARS = 400_000; // ~100k tokens total per service
 
 export async function validateWorkspacePath(workspacePath: string): Promise<void> {
   const stat = await fs.stat(workspacePath);
@@ -95,10 +96,13 @@ export async function readServiceSource(
   const rsFiles = await findRsFiles(serviceDir);
   const fileContents: Array<{ relativePath: string; content: string }> = [];
 
+  let totalChars = 0;
   for (const filePath of rsFiles) {
     const stat = await fs.stat(filePath);
     if (stat.size > MAX_FILE_SIZE) continue;
     const content = await fs.readFile(filePath, 'utf-8');
+    if (totalChars + content.length > MAX_TOTAL_CHARS) break;
+    totalChars += content.length;
     fileContents.push({
       relativePath: path.relative(workspacePath, filePath),
       content,

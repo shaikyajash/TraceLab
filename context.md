@@ -94,18 +94,19 @@ Every meaningful component in the codebase. These become the boxes in the graph.
 ```
 
 **Node kinds:**
-| Kind | Color | What it represents |
-|------|-------|--------------------|
-| `route_handler` | Blue | HTTP endpoints — where data enters |
-| `middleware` | Purple | Request interceptors (auth, logging, CORS) |
-| `business_logic` | Green | Domain logic, handler orchestration |
-| `validator` | Red/Orange | Input validation, constraint checks |
-| `transformer` | Amber | Data shape changes (hashing, encryption, serialization) |
-| `db_call` | Teal | Database operations (SELECT, INSERT, UPDATE) |
-| `external_http_call` | — | Outbound HTTP to other services |
-| `struct` / `enum` | — | Data carriers (filtered out in graph view) |
-| `message_queue` | — | Async messaging |
-| `function` | — | Utility functions |
+
+| Kind                 | Color      | What it represents                                      |
+| -------------------- | ---------- | ------------------------------------------------------- |
+| `route_handler`      | Blue       | HTTP endpoints — where data enters                      |
+| `middleware`         | Purple     | Request interceptors (auth, logging, CORS)              |
+| `business_logic`     | Green      | Domain logic, handler orchestration                     |
+| `validator`          | Red/Orange | Input validation, constraint checks                     |
+| `transformer`        | Amber      | Data shape changes (hashing, encryption, serialization) |
+| `db_call`            | Teal       | Database operations (SELECT, INSERT, UPDATE)            |
+| `external_http_call` | —          | Outbound HTTP to other services                         |
+| `struct` / `enum`    | —          | Data carriers (filtered out in graph view)              |
+| `message_queue`      | —          | Async messaging                                         |
+| `function`           | —          | Utility functions                                       |
 
 Only `route_handler`, `middleware`, `business_logic`, `validator`, `transformer`, `db_call` are shown in the graph (core kinds).
 

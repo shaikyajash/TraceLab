@@ -17,7 +17,7 @@ export type {
   SimulationStep,
   SimulationEvent,
   SimulationRequest,
-} from "@/lib/schema";
+} from '@/lib/schema';
 
 // UI-specific types
 export interface TraceStep {
@@ -26,6 +26,8 @@ export interface TraceStep {
   kind: string;
   description: string;
   edgeLabel: string;
+  inputType: string | null; // node.input type signature
+  outputType: string | null; // node.output type signature
 }
 
 export interface Position {

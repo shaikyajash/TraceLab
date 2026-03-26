@@ -7,7 +7,13 @@
       "Read(//tmp/**)",
       "Read(//private/tmp/**)",
       "Bash(for font:*)",
-      "Bash(do gh:*)"
+      "Bash(do gh:*)",
+      "WebFetch(domain:developers.openai.com)",
+      "WebFetch(domain:version.btcfi.wtf)",
+      "Read(//private/var/folders/wm/867twd854tv0zng60xyg5pk00000gr/T/**)",
+      "Read(//Users/lohit/**)",
+      "Bash(find /Users/lohit -name *.rs)",
+      "Read(//private/var/folders/**)"
     ]
   }
 }

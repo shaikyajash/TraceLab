@@ -1,12 +1,19 @@
-"use client";
+'use client';
 
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import type { ComponentsGraph, ComponentNode, PayloadEdge, ScanProgress, StepCondition, TraceStep } from "@/types";
-import { 
-  CORE_KINDS, 
-  NODE_W, 
-  NODE_H, 
-  H_GAP, 
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import type {
+  ComponentsGraph,
+  ComponentNode,
+  PayloadEdge,
+  ScanProgress,
+  StepCondition,
+  TraceStep,
+} from '@/types';
+import {
+  CORE_KINDS,
+  NODE_W,
+  NODE_H,
+  H_GAP,
   V_GAP,
   DEFAULT_SCALE,
   DEFAULT_TX,
@@ -17,14 +24,14 @@ import {
   TRACE_STEP_DELAY,
   TRACE_HEAD_CLEAR_DELAY,
   STORAGE_KEYS,
-} from "@/constants";
-import LandingPage from "@/components/LandingPage";
-import Sidebar from "@/components/Sidebar";
-import GraphCanvas from "@/components/GraphCanvas";
+} from '@/constants';
+import LandingPage from '@/components/LandingPage';
+import Sidebar from '@/components/Sidebar';
+import GraphCanvas from '@/components/GraphCanvas';
 
 function layoutNodes(
   nodes: ComponentNode[],
-  edges: PayloadEdge[]
+  edges: PayloadEdge[],
 ): Map<string, { x: number; y: number }> {
   const positions = new Map<string, { x: number; y: number }>();
   const ids = new Set(nodes.map((n) => n.id));
@@ -40,7 +47,7 @@ function layoutNodes(
   }
 
   const depth = new Map<string, number>();
-  const roots = nodes.filter((n) => !(incoming.get(n.id)?.length));
+  const roots = nodes.filter((n) => !incoming.get(n.id)?.length);
   const queue: string[] = [];
 
   for (const r of roots) {
@@ -123,7 +130,7 @@ function smartTrace(
   edges: PayloadEdge[],
   coreIds: Set<string>,
   nodeMap: Map<string, ComponentNode>,
-  payload: Record<string, unknown>
+  payload: Record<string, unknown>,
 ): TraceStep[] {
   const out = new Map<string, Array<{ to: string; payload: string }>>();
   for (const e of edges) {
@@ -134,12 +141,12 @@ function smartTrace(
 
   const hints: string[] = [];
   for (const v of Object.values(payload)) {
-    if (typeof v === "string") hints.push(v.toLowerCase());
+    if (typeof v === 'string') hints.push(v.toLowerCase());
   }
 
   const visited = new Set<string>();
   const steps: TraceStep[] = [];
-  const queue: Array<{ id: string; edgeLabel: string }> = [{ id: startId, edgeLabel: "" }];
+  const queue: Array<{ id: string; edgeLabel: string }> = [{ id: startId, edgeLabel: '' }];
   visited.add(startId);
 
   while (queue.length > 0) {
@@ -148,9 +155,11 @@ function smartTrace(
     steps.push({
       nodeId: id,
       name: node?.name || id,
-      kind: node?.kind || "function",
-      description: node?.description || "",
+      kind: node?.kind || 'function',
+      description: node?.description || '',
       edgeLabel,
+      inputType: node?.input ?? null,
+      outputType: node?.output ?? null,
     });
 
     const children = out.get(id) || [];
@@ -187,23 +196,25 @@ function smartTrace(
 }
 
 export default function Home() {
+  const [mounted, setMounted] = useState(false);
   const [graph, setGraph] = useState<ComponentsGraph | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [githubUrl, setGithubUrl] = useState("");
+  const [githubUrl, setGithubUrl] = useState('');
   const [isScanning, setIsScanning] = useState(false);
-  const [scanMessage, setScanMessage] = useState("");
-  const [scanPhase, setScanPhase] = useState<string>("");
+  const [scanMessage, setScanMessage] = useState('');
+  const [scanPhase, setScanPhase] = useState<string>('');
   const [forceRescan, setForceRescan] = useState(false);
 
   /* restore session from localStorage on mount */
   useEffect(() => {
+    setMounted(true);
     try {
       const savedGraph = localStorage.getItem(STORAGE_KEYS.GRAPH);
       const savedUrl = localStorage.getItem(STORAGE_KEYS.GITHUB_URL);
       if (savedGraph) setGraph(JSON.parse(savedGraph));
       if (savedUrl) setGithubUrl(savedUrl);
     } catch (err) {
-      console.error("Failed to restore session:", err);
+      console.error('Failed to restore session:', err);
     }
   }, []);
 
@@ -223,7 +234,7 @@ export default function Home() {
   const resizeStart = useRef({ x: 0, w: DEFAULT_SIDEBAR_WIDTH });
 
   /* simulation tracing */
-  const [traceMethod, setTraceMethod] = useState("GET");
+  const [traceMethod, setTraceMethod] = useState('GET');
   const [traceRouteId, setTraceRouteId] = useState<string | null>(null);
   const [activeTraceIds, setActiveTraceIds] = useState<Set<string>>(new Set());
   const [traceHeadId, setTraceHeadId] = useState<string | null>(null);
@@ -233,11 +244,11 @@ export default function Home() {
 
   /* request builder */
   const [pathParams, setPathParams] = useState<Record<string, string>>({});
-  const [reqBody, setReqBody] = useState("{\n  \n}");
-  const [activeReqTab, setActiveReqTab] = useState<"params" | "body">("params");
+  const [reqBody, setReqBody] = useState('{\n  \n}');
+  const [activeReqTab, setActiveReqTab] = useState<'params' | 'body'>('params');
 
   /* sidebar main tab */
-  const [mainTab, setMainTab] = useState<"request" | "trace">("request");
+  const [mainTab, setMainTab] = useState<'request' | 'trace'>('request');
 
   /* graph transition */
   const [isGraphLoaded, setIsGraphLoaded] = useState(false);
@@ -261,24 +272,22 @@ export default function Home() {
 
   const coreEdges = useMemo(() => {
     if (!graph) return [];
-    return graph.edges.filter(
-      (e) => coreNodeIds.has(e.from) && coreNodeIds.has(e.to)
-    );
+    return graph.edges.filter((e) => coreNodeIds.has(e.from) && coreNodeIds.has(e.to));
   }, [graph, coreNodeIds]);
 
   /* routes for sidebar */
   const routes = useMemo(() => {
-    return coreNodes.filter((n) => n.kind === "route_handler");
+    return coreNodes.filter((n) => n.kind === 'route_handler');
   }, [coreNodes]);
 
   /* extract path params from selected route pattern */
   const routePathParams = useMemo(() => {
     if (!traceRouteId) return [];
     const node = coreNodes.find((n) => n.id === traceRouteId);
-    const pattern = node?.path_pattern || "";
+    const pattern = node?.path_pattern || '';
     const matches = pattern.match(/[:{}][a-zA-Z_]+}?/g);
     if (!matches) return [];
-    return matches.map((m) => m.replace(/[:{}]/g, ""));
+    return matches.map((m) => m.replace(/[:{}]/g, ''));
   }, [traceRouteId, coreNodes]);
 
   /* auto-populate method, path params, and body when route changes */
@@ -291,11 +300,11 @@ export default function Home() {
       setTraceMethod(node.method.toUpperCase());
     } else {
       const idUpper = node.id.toUpperCase();
-      if (idUpper.startsWith("GET ")) setTraceMethod("GET");
-      else if (idUpper.startsWith("POST ")) setTraceMethod("POST");
-      else if (idUpper.startsWith("PUT ")) setTraceMethod("PUT");
-      else if (idUpper.startsWith("DELETE ")) setTraceMethod("DELETE");
-      else if (idUpper.startsWith("PATCH ")) setTraceMethod("PATCH");
+      if (idUpper.startsWith('GET ')) setTraceMethod('GET');
+      else if (idUpper.startsWith('POST ')) setTraceMethod('POST');
+      else if (idUpper.startsWith('PUT ')) setTraceMethod('PUT');
+      else if (idUpper.startsWith('DELETE ')) setTraceMethod('DELETE');
+      else if (idUpper.startsWith('PATCH ')) setTraceMethod('PATCH');
     }
 
     if (node.example_payload) {
@@ -304,23 +313,21 @@ export default function Home() {
       } catch {
         setReqBody(node.example_payload);
       }
-      const m = (node.method || "GET").toUpperCase();
-      if (m !== "GET" && m !== "HEAD") {
-        setActiveReqTab("body");
+      const m = (node.method || 'GET').toUpperCase();
+      if (m !== 'GET' && m !== 'HEAD') {
+        setActiveReqTab('body');
       }
     } else {
-      setReqBody("{\n  \n}");
+      setReqBody('{\n  \n}');
     }
 
     const init: Record<string, string> = {};
-    for (const p of routePathParams) init[p] = "";
+    for (const p of routePathParams) init[p] = '';
     setPathParams(init);
   }, [traceRouteId, coreNodes, routePathParams]);
 
   /* positions */
-  const [positions, setPositions] = useState<Map<string, { x: number; y: number }>>(
-    new Map()
-  );
+  const [positions, setPositions] = useState<Map<string, { x: number; y: number }>>(new Map());
 
   useEffect(() => {
     if (!graph) return;
@@ -328,24 +335,29 @@ export default function Home() {
   }, [graph, coreNodes, coreEdges]);
 
   /* sidebar resize handlers */
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsResizing(true);
-    resizeStart.current = { x: e.clientX, w: sidebarWidth };
-  }, [sidebarWidth]);
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setIsResizing(true);
+      resizeStart.current = { x: e.clientX, w: sidebarWidth };
+    },
+    [sidebarWidth],
+  );
 
   useEffect(() => {
     if (!isResizing) return;
     const onMove = (e: MouseEvent) => {
       const delta = e.clientX - resizeStart.current.x;
-      setSidebarWidth(Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, resizeStart.current.w + delta)));
+      setSidebarWidth(
+        Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, resizeStart.current.w + delta)),
+      );
     };
     const onUp = () => setIsResizing(false);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
     };
   }, [isResizing]);
 
@@ -355,13 +367,13 @@ export default function Home() {
     if (!url) return;
     setIsScanning(true);
     setError(null);
-    setScanMessage("Starting...");
-    setScanPhase("discovering");
+    setScanMessage('Starting...');
+    setScanPhase('discovering');
 
     try {
-      const res = await fetch("/api/clone-and-scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/clone-and-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, forceRescan }),
       });
 
@@ -372,16 +384,16 @@ export default function Home() {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = "";
-      let outputPath = "";
+      let buffer = '';
+      let outputPath = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
           if (!line.trim()) continue;
@@ -390,10 +402,10 @@ export default function Home() {
             setScanPhase(progress.phase);
             setScanMessage(progress.message);
 
-            if (progress.phase === "done" && progress.summary) {
+            if (progress.phase === 'done' && progress.summary) {
               outputPath = progress.summary.outputPath;
             }
-            if (progress.phase === "error") {
+            if (progress.phase === 'error') {
               throw new Error(progress.message);
             }
           } catch (e) {
@@ -403,9 +415,9 @@ export default function Home() {
       }
 
       if (outputPath) {
-        const loadRes = await fetch("/api/load-graph", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        const loadRes = await fetch('/api/load-graph', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: outputPath }),
         });
         if (loadRes.ok) {
@@ -414,15 +426,15 @@ export default function Home() {
           localStorage.setItem(STORAGE_KEYS.GRAPH, JSON.stringify(data));
           localStorage.setItem(STORAGE_KEYS.GITHUB_URL, url);
         } else {
-          throw new Error("Scan completed but failed to load graph");
+          throw new Error('Scan completed but failed to load graph');
         }
       }
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setIsScanning(false);
-      setScanPhase("");
-      setScanMessage("");
+      setScanPhase('');
+      setScanMessage('');
     }
   }, [githubUrl, forceRescan]);
 
@@ -438,7 +450,7 @@ export default function Home() {
         localStorage.setItem(STORAGE_KEYS.GRAPH, JSON.stringify(data));
         setError(null);
       } catch {
-        setError("Invalid JSON file");
+        setError('Invalid JSON file');
       }
     };
     reader.readAsText(file);
@@ -447,11 +459,11 @@ export default function Home() {
   /* canvas interactions */
   const handleCanvasMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      if ((e.target as HTMLElement).closest("[data-node]")) return;
+      if ((e.target as HTMLElement).closest('[data-node]')) return;
       setIsPanning(true);
       panStart.current = { x: e.clientX, y: e.clientY, tx, ty };
     },
-    [tx, ty]
+    [tx, ty],
   );
 
   const handleCanvasMouseMove = useCallback(
@@ -460,7 +472,7 @@ export default function Home() {
       setTx(panStart.current.tx + (e.clientX - panStart.current.x));
       setTy(panStart.current.ty + (e.clientY - panStart.current.y));
     },
-    [isPanning]
+    [isPanning],
   );
 
   const handleCanvasMouseUp = useCallback(() => setIsPanning(false), []);
@@ -476,14 +488,11 @@ export default function Home() {
   }, []);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
-    if (!(e.target as HTMLElement).closest("[data-node]")) setSelectedId(null);
+    if (!(e.target as HTMLElement).closest('[data-node]')) setSelectedId(null);
   }, []);
 
   /* node lookup */
-  const nodeById = useCallback(
-    (id: string) => coreNodes.find((n) => n.id === id),
-    [coreNodes]
-  );
+  const nodeById = useCallback((id: string) => coreNodes.find((n) => n.id === id), [coreNodes]);
 
   const nodeMap = useMemo(() => {
     const m = new Map<string, ComponentNode>();
@@ -503,7 +512,9 @@ export default function Home() {
     let payload: Record<string, unknown> = {};
     try {
       payload = JSON.parse(reqBody) as Record<string, unknown>;
-    } catch { /* empty */ }
+    } catch {
+      /* empty */
+    }
 
     let steps: TraceStep[];
 
@@ -513,15 +524,24 @@ export default function Home() {
       const evalCond = (c: StepCondition, p: Record<string, unknown>): boolean => {
         const v = p[c.field];
         switch (c.op) {
-          case "eq": return v === c.value;
-          case "neq": return v !== c.value;
-          case "in": return Array.isArray(c.value) && c.value.includes(String(v));
-          case "not_in": return Array.isArray(c.value) && !c.value.includes(String(v));
-          case "exists": return v !== undefined && v !== null;
-          case "not_exists": return v === undefined || v === null;
-          case "eq_field": return typeof c.value === "string" && v === p[c.value];
-          case "neq_field": return typeof c.value === "string" && v !== p[c.value];
-          default: return true;
+          case 'eq':
+            return v === c.value;
+          case 'neq':
+            return v !== c.value;
+          case 'in':
+            return Array.isArray(c.value) && c.value.includes(String(v));
+          case 'not_in':
+            return Array.isArray(c.value) && !c.value.includes(String(v));
+          case 'exists':
+            return v !== undefined && v !== null;
+          case 'not_exists':
+            return v === undefined || v === null;
+          case 'eq_field':
+            return typeof c.value === 'string' && v === p[c.value];
+          case 'neq_field':
+            return typeof c.value === 'string' && v !== p[c.value];
+          default:
+            return true;
         }
       };
 
@@ -530,12 +550,18 @@ export default function Home() {
       for (const trace of precomputed) {
         const conds = trace.match;
         if (!conds || conds.length === 0) continue;
-        if (conds.every((c) => evalCond(c, payload))) { bestTrace = trace; break; }
+        if (conds.every((c) => evalCond(c, payload))) {
+          bestTrace = trace;
+          break;
+        }
       }
       /* if nothing matched, use first unconditional trace */
       if (!bestTrace.match || bestTrace.match.length === 0) {
         for (const trace of precomputed) {
-          if (!trace.match || trace.match.length === 0) { bestTrace = trace; break; }
+          if (!trace.match || trace.match.length === 0) {
+            bestTrace = trace;
+            break;
+          }
         }
       }
 
@@ -547,9 +573,11 @@ export default function Home() {
           return {
             nodeId: s.node_id,
             name: node?.name || s.node_id,
-            kind: node?.kind || "function",
+            kind: node?.kind || 'function',
             description: s.summary,
             edgeLabel: s.edge_label,
+            inputType: node?.input ?? null,
+            outputType: node?.output ?? null,
           };
         });
     } else {
@@ -590,15 +618,19 @@ export default function Home() {
         error={error}
         handleScan={handleScan}
         handleUpload={handleUpload}
+        mounted={mounted}
       />
     );
   }
 
   /* graph visualizer */
-  const selectedNode = selectedId ? (nodeById(selectedId) || null) : null;
+  const selectedNode = selectedId ? nodeById(selectedId) || null : null;
 
   return (
-    <div className="bg-[#0d0d0f] h-screen flex overflow-hidden" style={{ userSelect: isResizing ? "none" : "auto" }}>
+    <div
+      className="bg-[#0d0d0f] h-screen flex overflow-hidden"
+      style={{ userSelect: isResizing ? 'none' : 'auto' }}
+    >
       <style>{`
         @keyframes dash { to { stroke-dashoffset: -18; } }
         @keyframes pulse {
@@ -611,76 +643,79 @@ export default function Home() {
         }
       `}</style>
 
-      <div 
+      <div
         className="flex w-full h-full"
         style={{
-          animation: isGraphLoaded ? "fadeInBlur 0.6s ease-out" : "none",
+          animation: isGraphLoaded ? 'fadeInBlur 0.6s ease-out' : 'none',
           opacity: isGraphLoaded ? 1 : 0,
-          filter: isGraphLoaded ? "blur(0px)" : "blur(8px)",
+          filter: isGraphLoaded ? 'blur(0px)' : 'blur(8px)',
         }}
       >
+        <Sidebar
+          width={sidebarWidth}
+          routes={routes}
+          traceMethod={traceMethod}
+          traceRouteId={traceRouteId}
+          setTraceRouteId={setTraceRouteId}
+          setTraceMethod={setTraceMethod}
+          clearTrace={clearTrace}
+          setSelectedId={setSelectedId}
+          routePathParams={routePathParams}
+          pathParams={pathParams}
+          setPathParams={setPathParams}
+          reqBody={reqBody}
+          setReqBody={setReqBody}
+          activeReqTab={activeReqTab}
+          setActiveReqTab={setActiveReqTab}
+          runSimulation={runSimulation}
+          isTracing={isTracing}
+          traceSteps={traceSteps}
+          traceVisible={traceVisible}
+          selectedNode={selectedNode}
+          coreEdges={coreEdges}
+          nodeById={nodeById}
+          setGraph={setGraph}
+          setError={setError}
+          mainTab={mainTab}
+          setMainTab={setMainTab}
+        />
 
-      <Sidebar
-        width={sidebarWidth}
-        routes={routes}
-        traceMethod={traceMethod}
-        traceRouteId={traceRouteId}
-        setTraceRouteId={setTraceRouteId}
-        setTraceMethod={setTraceMethod}
-        clearTrace={clearTrace}
-        setSelectedId={setSelectedId}
-        routePathParams={routePathParams}
-        pathParams={pathParams}
-        setPathParams={setPathParams}
-        reqBody={reqBody}
-        setReqBody={setReqBody}
-        activeReqTab={activeReqTab}
-        setActiveReqTab={setActiveReqTab}
-        runSimulation={runSimulation}
-        isTracing={isTracing}
-        traceSteps={traceSteps}
-        traceVisible={traceVisible}
-        selectedNode={selectedNode}
-        coreEdges={coreEdges}
-        nodeById={nodeById}
-        setGraph={setGraph}
-        setError={setError}
-        mainTab={mainTab}
-        setMainTab={setMainTab}
-      />
+        {/* Resize handle */}
+        <div
+          onMouseDown={handleResizeStart}
+          className="w-1 cursor-col-resize transition-colors duration-150 z-20 shrink-0"
+          style={{ background: isResizing ? '#378ADD' : 'transparent' }}
+          onMouseEnter={(e) => {
+            (e.target as HTMLElement).style.background = '#333';
+          }}
+          onMouseLeave={(e) => {
+            if (!isResizing) (e.target as HTMLElement).style.background = 'transparent';
+          }}
+        />
 
-      {/* Resize handle */}
-      <div
-        onMouseDown={handleResizeStart}
-        className="w-1 cursor-col-resize transition-colors duration-150 z-20 shrink-0"
-        style={{ background: isResizing ? "#378ADD" : "transparent" }}
-        onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "#333"; }}
-        onMouseLeave={(e) => { if (!isResizing) (e.target as HTMLElement).style.background = "transparent"; }}
-      />
-
-      <GraphCanvas
-        coreNodes={coreNodes}
-        coreEdges={coreEdges}
-        positions={positions}
-        tx={tx}
-        ty={ty}
-        scale={scale}
-        isPanning={isPanning}
-        selectedId={selectedId}
-        activeTraceIds={activeTraceIds}
-        traceHeadId={traceHeadId}
-        setSelectedId={(id) => {
-          setSelectedId(id);
-          if (id) setMainTab("request");
-        }}
-        handleCanvasMouseDown={handleCanvasMouseDown}
-        handleCanvasMouseMove={handleCanvasMouseMove}
-        handleCanvasMouseUp={handleCanvasMouseUp}
-        handleWheel={handleWheel}
-        handleCanvasClick={handleCanvasClick}
-        fitView={fitView}
-        setScale={setScale}
-      />
+        <GraphCanvas
+          coreNodes={coreNodes}
+          coreEdges={coreEdges}
+          positions={positions}
+          tx={tx}
+          ty={ty}
+          scale={scale}
+          isPanning={isPanning}
+          selectedId={selectedId}
+          activeTraceIds={activeTraceIds}
+          traceHeadId={traceHeadId}
+          setSelectedId={(id) => {
+            setSelectedId(id);
+            if (id) setMainTab('request');
+          }}
+          handleCanvasMouseDown={handleCanvasMouseDown}
+          handleCanvasMouseMove={handleCanvasMouseMove}
+          handleCanvasMouseUp={handleCanvasMouseUp}
+          handleWheel={handleWheel}
+          handleCanvasClick={handleCanvasClick}
+          fitView={fitView}
+          setScale={setScale}
+        />
       </div>
     </div>
   );

@@ -80,8 +80,9 @@ export async function analyzeService(
   let jsonStr: string;
   try {
     jsonStr = await chat({ system, user });
-  } catch {
-    throw new Error(`LLM call failed for service ${service.name}`);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`LLM call failed for service ${service.name}: ${reason}`);
   }
 
   // Step 4: Parse (with JSON-fix retry)
@@ -89,7 +90,6 @@ export async function analyzeService(
   try {
     result = parseResult(jsonStr);
   } catch {
-    // JSON was malformed — ask LLM to fix it
     const fixed = await chat({
       system: 'Fix the following invalid JSON. Return ONLY valid JSON, nothing else.',
       user: jsonStr,
@@ -98,7 +98,7 @@ export async function analyzeService(
   }
 
   // Step 5: Validate and repair loop
-  const maxAttempts = options?.maxRepairAttempts ?? 2;
+  const maxAttempts = options?.maxRepairAttempts ?? 3;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const validation = validatePerServiceResult(result, externalTypes);
 

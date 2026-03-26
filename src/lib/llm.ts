@@ -10,9 +10,9 @@ interface LLMConfig {
 }
 
 const PROVIDER_CONFIGS: Record<LLMProvider, { model: string }> = {
-  claude: { model: 'claude-sonnet-4-6-20250514' },
-  gemini: { model: 'gemini-2.5-flash' },
-  openai: { model: 'gpt-4o-mini' },
+  claude: { model: 'claude-opus-4-6' },
+  gemini: { model: 'gemini-3.1-pro-preview' },
+  openai: { model: 'gpt-5.4-2026-03-05' },
 };
 
 // Runtime override — set by API routes per-request
@@ -65,7 +65,9 @@ export async function chat(opts: {
   temperature?: number;
 }): Promise<string> {
   const { provider, model } = getConfig();
-  const { system, user, maxTokens = 16384, temperature = 0 } = opts;
+  // Reasoning models (o1/o3/o4 and gpt-5 family) consume tokens internally for chain-of-thought
+  const isReasoning = /^o\d/i.test(model) || /^gpt-5/i.test(model);
+  const { system, user, maxTokens = isReasoning ? 65536 : 16384, temperature = 0 } = opts;
 
   if (provider === 'claude') {
     return chatClaude({ model, system, user, maxTokens, temperature });
@@ -119,6 +121,7 @@ async function chatGemini(opts: {
       systemInstruction: opts.system,
       maxOutputTokens: opts.maxTokens,
       temperature: opts.temperature,
+      responseMimeType: 'application/json',
     },
   });
 
@@ -142,17 +145,24 @@ async function chatOpenAI(opts: {
   }
 
   const client = new OpenAI({ apiKey });
-  const response = await client.chat.completions.create({
+
+  // Some OpenAI models reject temperature (reasoning family + GPT-5 family).
+  const disallowTemperature = /^o\d/i.test(opts.model) || /^gpt-5/i.test(opts.model);
+  const response = await client.responses.create({
     model: opts.model,
-    max_tokens: opts.maxTokens,
-    temperature: opts.temperature,
-    messages: [
+    input: [
       { role: 'system', content: opts.system },
       { role: 'user', content: opts.user },
     ],
+    ...(disallowTemperature
+      ? {}
+      : {
+          temperature: opts.temperature,
+          text: { format: { type: 'json_object' as const } },
+        }),
   });
 
-  const text = response.choices[0]?.message?.content;
+  const text = response.output_text;
   if (!text) {
     throw new Error('No text response from OpenAI');
   }

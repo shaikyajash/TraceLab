@@ -1,10 +1,16 @@
-"use client";
+'use client';
 
-import React from "react";
-import type { ComponentNode, PayloadEdge } from "@/types";
-import { KIND_COLORS, KIND_LABELS } from "@/constants";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Button } from "@/components/ui/button";
+import React from 'react';
+import type { ComponentNode, PayloadEdge } from '@/types';
+import { KIND_COLORS, KIND_LABELS } from '@/constants';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
 
 interface SidebarProps {
   width: number;
@@ -17,11 +23,13 @@ interface SidebarProps {
   setSelectedId: (id: string | null) => void;
   routePathParams: string[];
   pathParams: Record<string, string>;
-  setPathParams: (params: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>)) => void;
+  setPathParams: (
+    params: Record<string, string> | ((prev: Record<string, string>) => Record<string, string>),
+  ) => void;
   reqBody: string;
   setReqBody: (body: string) => void;
-  activeReqTab: "params" | "body";
-  setActiveReqTab: (tab: "params" | "body") => void;
+  activeReqTab: 'params' | 'body';
+  setActiveReqTab: (tab: 'params' | 'body') => void;
   runSimulation: () => void;
   isTracing: boolean;
   traceSteps: any[];
@@ -31,15 +39,17 @@ interface SidebarProps {
   nodeById: (id: string) => ComponentNode | undefined;
   setGraph: (graph: any) => void;
   setError: (error: string | null) => void;
-  mainTab?: "request" | "trace";
-  setMainTab?: (tab: "request" | "trace") => void;
+  mainTab?: 'request' | 'trace';
+  setMainTab?: (tab: 'request' | 'trace') => void;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
       <div className="text-[9px] text-[#666] mb-1 tracking-wide font-medium">{label}</div>
-      <div className="bg-[#0d0d0f] border-[0.5px] border-[#2a2a2e] rounded-md px-2.5 py-2 text-[11px] text-[#bbb] wrap-break-word leading-relaxed">{children}</div>
+      <div className="bg-[#0d0d0f] border-[0.5px] border-[#2a2a2e] rounded-md px-2.5 py-2 text-[11px] text-[#bbb] wrap-break-word leading-relaxed">
+        {children}
+      </div>
     </div>
   );
 }
@@ -71,7 +81,7 @@ export default function Sidebar(props: SidebarProps) {
     setMainTab: externalSetMainTab,
   } = props;
 
-  const [internalMainTab, setInternalMainTab] = React.useState<"request" | "trace">("request");
+  const [internalMainTab, setInternalMainTab] = React.useState<'request' | 'trace'>('request');
   const mainTab = externalMainTab ?? internalMainTab;
   const setMainTab = externalSetMainTab ?? setInternalMainTab;
 
@@ -79,19 +89,34 @@ export default function Sidebar(props: SidebarProps) {
   const [bodyOpen, setBodyOpen] = React.useState(true);
   const [inspectorOpen, setInspectorOpen] = React.useState(true);
 
+  // Per-step IO state: editable input value + whether IO panel is expanded
+  const [stepInputs, setStepInputs] = React.useState<string[]>([]);
+  const [stepExpanded, setStepExpanded] = React.useState<Set<number>>(new Set());
+
+  // Reset step IO whenever a new trace runs
+  React.useEffect(() => {
+    if (traceSteps.length === 0) {
+      setStepInputs([]);
+      setStepExpanded(new Set());
+      return;
+    }
+    setStepInputs(traceSteps.map((_, i) => (i === 0 ? reqBody : '')));
+    setStepExpanded(new Set());
+  }, [traceSteps]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const traceFlowRef = React.useRef<HTMLDivElement>(null);
 
   const handleSimulate = () => {
     runSimulation();
-    setMainTab("trace");
+    setMainTab('trace');
   };
 
   // Auto-scroll to latest step
   React.useEffect(() => {
-    if (mainTab === "trace" && traceFlowRef.current && traceVisible > 0) {
+    if (mainTab === 'trace' && traceFlowRef.current && traceVisible > 0) {
       traceFlowRef.current.scrollTo({
         top: traceFlowRef.current.scrollHeight,
-        behavior: "smooth"
+        behavior: 'smooth',
       });
     }
   }, [traceVisible, mainTab]);
@@ -107,17 +132,33 @@ export default function Sidebar(props: SidebarProps) {
 
         {/* Method + Route */}
         <div className="flex gap-1.5 mb-2.5">
-          <div 
+          <div
             className="bg-[#111114] border-[0.5px] border-[#2a2a2e] rounded-md px-2 py-2 font-bold text-[10px] w-12 text-center shrink-0"
-            style={{ color: traceMethod === "GET" ? "#3B6D11" : traceMethod === "POST" ? "#854F0B" : traceMethod === "DELETE" ? "#993C1D" : "#534AB7" }}
+            style={{
+              color:
+                traceMethod === 'GET'
+                  ? '#3B6D11'
+                  : traceMethod === 'POST'
+                    ? '#854F0B'
+                    : traceMethod === 'DELETE'
+                      ? '#993C1D'
+                      : '#534AB7',
+            }}
           >
             {traceMethod}
           </div>
-          <Select value={traceRouteId || ""} onValueChange={(value: string) => { setTraceRouteId(value || null); clearTrace(); setSelectedId(value || null); }}>
+          <Select
+            value={traceRouteId || ''}
+            onValueChange={(value: string) => {
+              setTraceRouteId(value || null);
+              clearTrace();
+              setSelectedId(value || null);
+            }}
+          >
             <SelectTrigger className="flex-1 bg-[#111114] border-[#2a2a2e] h-auto py-2 px-3 text-white text-[11px] hover:border-[#378ADD] focus:ring-0 focus:ring-offset-0">
               <SelectValue placeholder="select route..." className="text-white" />
             </SelectTrigger>
-            <SelectContent 
+            <SelectContent
               className="bg-[#111114] border-[#2a2a2e] text-white max-h-[300px] overflow-y-auto"
               position="popper"
               side="bottom"
@@ -125,9 +166,9 @@ export default function Sidebar(props: SidebarProps) {
               sideOffset={4}
             >
               {routes.map((r) => (
-                <SelectItem 
-                  key={r.id} 
-                  value={r.id} 
+                <SelectItem
+                  key={r.id}
+                  value={r.id}
                   className="text-[11px] text-white hover:bg-[#378ADD] hover:text-white focus:bg-[#378ADD] focus:text-white cursor-pointer data-highlighted:bg-[#378ADD] data-highlighted:text-white"
                 >
                   {r.path_pattern || r.name}
@@ -138,37 +179,39 @@ export default function Sidebar(props: SidebarProps) {
         </div>
 
         {/* Simulate button */}
-        <Button 
-          onClick={traceSteps.length > 0 && !isTracing ? clearTrace : handleSimulate} 
+        <Button
+          onClick={traceSteps.length > 0 && !isTracing ? clearTrace : handleSimulate}
           disabled={!traceRouteId || isTracing}
           className="w-full bg-[#378ADD] hover:bg-[#4a9bef] text-white disabled:bg-[#1a1a1e] disabled:text-[#555] disabled:opacity-40"
         >
-          {isTracing ? "Simulating..." : traceSteps.length > 0 ? "Clear Simulation" : "Simulate"}
+          {isTracing ? 'Simulating...' : traceSteps.length > 0 ? 'Clear Simulation' : 'Simulate'}
         </Button>
       </div>
 
       {/* Main Tabs */}
       <div className="flex gap-0 border-b-[0.5px] border-[#2a2a2e]">
-        {(["request", "trace"] as const).map((tab) => (
-          <button 
-            key={tab} 
+        {(['request', 'trace'] as const).map((tab) => (
+          <button
+            key={tab}
             onClick={() => setMainTab(tab)}
             className="flex-1 bg-transparent border-none px-0 py-3 font-normal text-[10px] tracking-wide cursor-pointer uppercase transition-colors"
-            style={{ 
-              borderBottom: mainTab === tab ? "2px solid #378ADD" : "2px solid transparent",
-              color: mainTab === tab ? "#ddd" : "#666",
+            style={{
+              borderBottom: mainTab === tab ? '2px solid #378ADD' : '2px solid transparent',
+              color: mainTab === tab ? '#ddd' : '#666',
               fontWeight: mainTab === tab ? 600 : 400,
             }}
           >
-            {tab === "request" ? "Request" : "Trace Flow"}
-            {tab === "trace" && traceSteps.length > 0 && <span className="text-[#378ADD] ml-1">{traceSteps.length}</span>}
+            {tab === 'request' ? 'Request' : 'Trace Flow'}
+            {tab === 'trace' && traceSteps.length > 0 && (
+              <span className="text-[#378ADD] ml-1">{traceSteps.length}</span>
+            )}
           </button>
         ))}
       </div>
 
       {/* Tab Content */}
       <div ref={traceFlowRef} className="flex-1 overflow-y-auto p-4">
-        {mainTab === "request" ? (
+        {mainTab === 'request' ? (
           <>
             {/* Params Section */}
             <div className="mb-4">
@@ -178,36 +221,49 @@ export default function Sidebar(props: SidebarProps) {
               >
                 <div className="text-[10px] text-[#666] tracking-[1.2px] font-semibold">
                   PARAMS
-                  {routePathParams.length > 0 && <span className="text-[#854F0B] ml-1.5">{routePathParams.length}</span>}
+                  {routePathParams.length > 0 && (
+                    <span className="text-[#854F0B] ml-1.5">{routePathParams.length}</span>
+                  )}
                 </div>
-                <svg 
+                <svg
                   className="w-3 h-3 text-[#666] transition-transform duration-200"
-                  fill="none" 
-                  viewBox="0 0 24 24" 
+                  fill="none"
+                  viewBox="0 0 24 24"
                   stroke="currentColor"
                   style={{ transform: paramsOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
                 </svg>
               </button>
               {paramsOpen && (
                 <div className="mt-2.5">
                   {routePathParams.length === 0 ? (
                     <div className="text-[11px] text-[#555] py-4 text-center">
-                      {traceRouteId ? "No path parameters" : "Select a route first"}
+                      {traceRouteId ? 'No path parameters' : 'Select a route first'}
                     </div>
-                  ) : routePathParams.map((param) => (
-                    <div key={param} className="mb-2">
-                      <div className="text-[9px] text-[#854F0B] mb-1 font-semibold tracking-wide">:{param}</div>
-                      <input 
-                        type="text" 
-                        value={pathParams[param] || ""} 
-                        onChange={(e) => setPathParams((prev) => ({ ...prev, [param]: e.target.value }))}
-                        placeholder={`value for :${param}`}
-                        className="w-full bg-[#111114] border-[0.5px] border-[#2a2a2e] rounded-md px-2.5 py-2 text-[#ddd] text-[11px] outline-none box-border"
-                      />
-                    </div>
-                  ))}
+                  ) : (
+                    routePathParams.map((param) => (
+                      <div key={param} className="mb-2">
+                        <div className="text-[9px] text-[#854F0B] mb-1 font-semibold tracking-wide">
+                          :{param}
+                        </div>
+                        <input
+                          type="text"
+                          value={pathParams[param] || ''}
+                          onChange={(e) =>
+                            setPathParams((prev) => ({ ...prev, [param]: e.target.value }))
+                          }
+                          placeholder={`value for :${param}`}
+                          className="w-full bg-[#111114] border-[0.5px] border-[#2a2a2e] rounded-md px-2.5 py-2 text-[#ddd] text-[11px] outline-none box-border"
+                        />
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
             </div>
@@ -219,22 +275,27 @@ export default function Sidebar(props: SidebarProps) {
                 className="w-full flex items-center justify-between bg-transparent border-none py-2 cursor-pointer"
               >
                 <div className="text-[10px] text-[#666] tracking-[1.2px] font-semibold">BODY</div>
-                <svg 
+                <svg
                   className="w-3 h-3 text-[#666] transition-transform duration-200"
-                  fill="none" 
-                  viewBox="0 0 24 24" 
+                  fill="none"
+                  viewBox="0 0 24 24"
                   stroke="currentColor"
                   style={{ transform: bodyOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
                 </svg>
               </button>
               {bodyOpen && (
                 <div className="mt-2.5">
-                  <textarea 
-                    value={reqBody} 
-                    onChange={(e) => setReqBody(e.target.value)} 
-                    placeholder='{"action": "Generate", ...}' 
+                  <textarea
+                    value={reqBody}
+                    onChange={(e) => setReqBody(e.target.value)}
+                    placeholder='{"action": "Generate", ...}'
                     spellCheck={false}
                     className="w-full min-h-[120px] bg-[#111114] border-[0.5px] border-[#2a2a2e] rounded-md p-2.5 text-[#ddd] text-[11px] outline-none box-border resize-y leading-relaxed"
                   />
@@ -249,82 +310,101 @@ export default function Sidebar(props: SidebarProps) {
                   onClick={() => setInspectorOpen(!inspectorOpen)}
                   className="w-full flex items-center justify-between bg-transparent border-none py-2 cursor-pointer"
                 >
-                  <div className="text-[10px] text-[#666] tracking-[1.2px] font-semibold">INSPECTOR</div>
-                  <svg 
+                  <div className="text-[10px] text-[#666] tracking-[1.2px] font-semibold">
+                    INSPECTOR
+                  </div>
+                  <svg
                     className="w-3 h-3 text-[#666] transition-transform duration-200"
-                    fill="none" 
-                    viewBox="0 0 24 24" 
+                    fill="none"
+                    viewBox="0 0 24 24"
                     stroke="currentColor"
                     style={{ transform: inspectorOpen ? 'rotate(180deg)' : 'rotate(0deg)' }}
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 9l-7 7-7-7"
+                    />
                   </svg>
                 </button>
                 {inspectorOpen && (
                   <div className="mt-2.5 space-y-3">
                     <div className="text-[13px] text-[#ddd] font-semibold">{selectedNode.name}</div>
 
-                      <Field label="KIND">
-                        <span 
-                          className="inline-block text-[9px] font-bold tracking-wide px-[7px] py-[3px] rounded"
-                          style={{ 
-                            background: (KIND_COLORS[selectedNode.kind] || KIND_COLORS.business_logic).badgeBg, 
-                            color: (KIND_COLORS[selectedNode.kind] || KIND_COLORS.business_logic).badgeText 
-                          }}
-                        >
-                          {KIND_LABELS[selectedNode.kind] || selectedNode.kind.toUpperCase()}
-                        </span>
-                      </Field>
+                    <Field label="KIND">
+                      <span
+                        className="inline-block text-[9px] font-bold tracking-wide px-[7px] py-[3px] rounded"
+                        style={{
+                          background: (KIND_COLORS[selectedNode.kind] || KIND_COLORS.business_logic)
+                            .badgeBg,
+                          color: (KIND_COLORS[selectedNode.kind] || KIND_COLORS.business_logic)
+                            .badgeText,
+                        }}
+                      >
+                        {KIND_LABELS[selectedNode.kind] || selectedNode.kind.toUpperCase()}
+                      </span>
+                    </Field>
 
-                      <Field label="DEFINED IN">{selectedNode.defined_in || "—"}</Field>
-                      <Field label="INPUT">{selectedNode.input || "—"}</Field>
-                      <Field label="OUTPUT">{selectedNode.output || "—"}</Field>
+                    <Field label="DEFINED IN">{selectedNode.defined_in || '—'}</Field>
+                    <Field label="INPUT">{selectedNode.input || '—'}</Field>
+                    <Field label="OUTPUT">{selectedNode.output || '—'}</Field>
 
-                      <Field label="MUTATES STATE">
-                        <span 
-                          className="inline-block text-[9px] font-semibold px-2.5 py-[3px] rounded-xl border-[0.5px]"
-                          style={{ 
-                            background: selectedNode.mutates_state ? "#2d1a0a" : "#0d1f0d",
-                            borderColor: selectedNode.mutates_state ? "#633806" : "#27500A",
-                            color: selectedNode.mutates_state ? "#EF9F27" : "#639922"
-                          }}
-                        >
-                          {selectedNode.mutates_state ? "YES" : "NO"}
-                        </span>
-                      </Field>
+                    <Field label="MUTATES STATE">
+                      <span
+                        className="inline-block text-[9px] font-semibold px-2.5 py-[3px] rounded-xl border-[0.5px]"
+                        style={{
+                          background: selectedNode.mutates_state ? '#2d1a0a' : '#0d1f0d',
+                          borderColor: selectedNode.mutates_state ? '#633806' : '#27500A',
+                          color: selectedNode.mutates_state ? '#EF9F27' : '#639922',
+                        }}
+                      >
+                        {selectedNode.mutates_state ? 'YES' : 'NO'}
+                      </span>
+                    </Field>
 
-                      {selectedNode.description && <Field label="DESCRIPTION">{selectedNode.description}</Field>}
+                    {selectedNode.description && (
+                      <Field label="DESCRIPTION">{selectedNode.description}</Field>
+                    )}
 
-                      {(() => {
-                        const inEdges = coreEdges.filter((e) => e.to === selectedNode.id);
-                        if (inEdges.length === 0) return null;
-                        return (
-                          <Field label={`RECEIVES FROM (${inEdges.length})`}>
-                            {inEdges.map((e, i) => (
-                              <div key={i} className={i > 0 ? "mt-2" : ""}>
-                                <div className="text-[10px] text-[#378ADD] font-medium">{nodeById(e.from)?.name || e.from}</div>
-                                {e.payload && <div className="text-[9px] text-[#666] mt-0.5">{e.payload}</div>}
+                    {(() => {
+                      const inEdges = coreEdges.filter((e) => e.to === selectedNode.id);
+                      if (inEdges.length === 0) return null;
+                      return (
+                        <Field label={`RECEIVES FROM (${inEdges.length})`}>
+                          {inEdges.map((e, i) => (
+                            <div key={i} className={i > 0 ? 'mt-2' : ''}>
+                              <div className="text-[10px] text-[#378ADD] font-medium">
+                                {nodeById(e.from)?.name || e.from}
                               </div>
-                            ))}
-                          </Field>
-                        );
-                      })()}
+                              {e.payload && (
+                                <div className="text-[9px] text-[#666] mt-0.5">{e.payload}</div>
+                              )}
+                            </div>
+                          ))}
+                        </Field>
+                      );
+                    })()}
 
-                      {(() => {
-                        const outEdges = coreEdges.filter((e) => e.from === selectedNode.id);
-                        if (outEdges.length === 0) return null;
-                        return (
-                          <Field label={`SENDS TO (${outEdges.length})`}>
-                            {outEdges.map((e, i) => (
-                              <div key={i} className={i > 0 ? "mt-2" : ""}>
-                                <div className="text-[10px] text-[#1D9E75] font-medium">{nodeById(e.to)?.name || e.to}</div>
-                                {e.payload && <div className="text-[9px] text-[#666] mt-0.5">{e.payload}</div>}
+                    {(() => {
+                      const outEdges = coreEdges.filter((e) => e.from === selectedNode.id);
+                      if (outEdges.length === 0) return null;
+                      return (
+                        <Field label={`SENDS TO (${outEdges.length})`}>
+                          {outEdges.map((e, i) => (
+                            <div key={i} className={i > 0 ? 'mt-2' : ''}>
+                              <div className="text-[10px] text-[#1D9E75] font-medium">
+                                {nodeById(e.to)?.name || e.to}
                               </div>
-                            ))}
-                          </Field>
-                        );
-                      })()}
-                    </div>
+                              {e.payload && (
+                                <div className="text-[9px] text-[#666] mt-0.5">{e.payload}</div>
+                              )}
+                            </div>
+                          ))}
+                        </Field>
+                      );
+                    })()}
+                  </div>
                 )}
               </div>
             )}
@@ -336,44 +416,137 @@ export default function Sidebar(props: SidebarProps) {
               <>
                 <div className="text-[10px] text-[#666] tracking-wider mb-3 font-semibold">
                   TRACE FLOW
-                  <span className="text-[#555] ml-2 tracking-normal">{traceVisible} / {traceSteps.length} steps</span>
+                  <span className="text-[#555] ml-2 tracking-normal">
+                    {traceVisible} / {traceSteps.length} steps
+                  </span>
                 </div>
                 {!isTracing && (
                   <div className="mb-3 flex gap-3 text-[10px] items-center">
-                    <span className="bg-[#0e2e0e] text-[#7ac97a] px-2 py-0.5 rounded font-bold">DONE</span>
-                    <button onClick={clearTrace} className="ml-auto bg-transparent border-none text-[#666] text-[9px] cursor-pointer underline hover:text-[#888]">clear</button>
+                    <span className="bg-[#0e2e0e] text-[#7ac97a] px-2 py-0.5 rounded font-bold">
+                      DONE
+                    </span>
+                    <button
+                      onClick={clearTrace}
+                      className="ml-auto bg-transparent border-none text-[#666] text-[9px] cursor-pointer underline hover:text-[#888]"
+                    >
+                      clear
+                    </button>
                   </div>
                 )}
                 {traceSteps.slice(0, traceVisible).map((step, i) => {
                   const colors = KIND_COLORS[step.kind] || KIND_COLORS.business_logic;
+                  const isExpanded = stepExpanded.has(i);
+                  const toggleExpanded = () =>
+                    setStepExpanded((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(i)) next.delete(i);
+                      else next.add(i);
+                      return next;
+                    });
+
                   return (
                     <div key={i} className="mb-1">
-                      {i > 0 && step.edgeLabel && (
+                      {/* Arrow + edge label between steps */}
+                      {i > 0 && (
                         <div className="flex items-center gap-2 py-1 pl-4">
                           <div className="w-0 h-0 border-l-4 border-l-[#378ADD] border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent" />
-                          <span className="text-[9px] text-[#666] italic">{step.edgeLabel}</span>
+                          {step.edgeLabel && (
+                            <span className="text-[9px] text-[#555] italic">{step.edgeLabel}</span>
+                          )}
                         </div>
                       )}
-                      {i > 0 && !step.edgeLabel && (
-                        <div className="flex items-center gap-2 py-1 pl-4">
-                          <div className="w-0 h-0 border-l-4 border-l-[#378ADD] border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent" />
-                        </div>
-                      )}
-                      <div 
-                        className="bg-[#111114] rounded-md p-3 hover:bg-[#14141a] transition-colors"
+
+                      {/* Step card */}
+                      <div
+                        className="bg-[#111114] rounded-md overflow-hidden"
                         style={{ border: `0.5px solid ${colors.border}33` }}
                       >
-                        <div className="flex items-center gap-2 mb-1">
-                          <div 
-                            className="text-[8px] px-1.5 py-0.5 rounded font-bold"
-                            style={{ background: colors.badgeBg, color: colors.badgeText }}
-                          >
-                            {KIND_LABELS[step.kind] || step.kind.toUpperCase()}
+                        {/* Header row — always visible */}
+                        <div className="p-3">
+                          <div className="flex items-center gap-2 mb-1">
+                            <div
+                              className="text-[8px] px-1.5 py-0.5 rounded font-bold shrink-0"
+                              style={{ background: colors.badgeBg, color: colors.badgeText }}
+                            >
+                              {KIND_LABELS[step.kind] || step.kind.toUpperCase()}
+                            </div>
+                            <span className="text-[10px] text-[#bbb] font-medium flex-1 min-w-0 truncate">
+                              {step.name}
+                            </span>
+                            {/* IO toggle */}
+                            <button
+                              onClick={toggleExpanded}
+                              title={isExpanded ? 'Hide IO' : 'Show IO'}
+                              className="shrink-0 bg-transparent border-none cursor-pointer text-[#555] hover:text-[#378ADD] transition-colors p-0"
+                            >
+                              <svg
+                                className="w-3 h-3 transition-transform duration-150"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                style={{
+                                  transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                                }}
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  strokeWidth={2}
+                                  d="M19 9l-7 7-7-7"
+                                />
+                              </svg>
+                            </button>
                           </div>
-                          <span className="text-[10px] text-[#bbb] font-medium">{step.name}</span>
+                          {step.description && (
+                            <div className="text-[9px] text-[#666] leading-relaxed">
+                              {step.description}
+                            </div>
+                          )}
                         </div>
-                        {step.description && (
-                          <div className="text-[9px] text-[#666] leading-relaxed">{step.description}</div>
+
+                        {/* Expandable IO panel */}
+                        {isExpanded && (
+                          <div className="border-t border-[#1e1e22] px-3 pb-3 pt-2 space-y-2">
+                            {/* INPUT — editable */}
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[8px] text-[#378ADD] font-bold tracking-widest">
+                                  INPUT
+                                </span>
+                                {step.inputType && (
+                                  <span className="text-[8px] text-[#444] font-mono truncate max-w-[60%]">
+                                    {step.inputType}
+                                  </span>
+                                )}
+                              </div>
+                              <textarea
+                                value={stepInputs[i] ?? ''}
+                                onChange={(e) =>
+                                  setStepInputs((prev) => {
+                                    const next = [...prev];
+                                    next[i] = e.target.value;
+                                    return next;
+                                  })
+                                }
+                                placeholder={step.edgeLabel || 'enter input data...'}
+                                spellCheck={false}
+                                rows={3}
+                                className="w-full bg-[#0d0d0f] border border-[#2a2a2e] rounded px-2 py-1.5 text-[10px] text-[#ccc] font-mono outline-none resize-y focus:border-[#378ADD] transition-colors box-border leading-relaxed"
+                              />
+                            </div>
+
+                            {/* OUTPUT — type hint, read-only */}
+                            {step.outputType && (
+                              <div>
+                                <span className="text-[8px] text-[#1D9E75] font-bold tracking-widest">
+                                  OUTPUT
+                                </span>
+                                <div className="mt-1 bg-[#0d0d0f] border border-[#1e1e22] rounded px-2 py-1.5 text-[10px] text-[#666] font-mono leading-relaxed">
+                                  {step.outputType}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
@@ -382,7 +555,9 @@ export default function Sidebar(props: SidebarProps) {
               </>
             ) : (
               <div className="text-[#444] text-[11px] text-center mt-16 leading-relaxed">
-                No trace available<br />Run a simulation first
+                No trace available
+                <br />
+                Run a simulation first
               </div>
             )}
           </>
@@ -391,8 +566,13 @@ export default function Sidebar(props: SidebarProps) {
 
       {/* Back button */}
       <div className="p-4 border-t border-[#2a2a2e]">
-        <button 
-          onClick={() => { setGraph(null); setSelectedId(null); setError(null); clearTrace(); }}
+        <button
+          onClick={() => {
+            setGraph(null);
+            setSelectedId(null);
+            setError(null);
+            clearTrace();
+          }}
           className="w-full bg-transparent border border-[#2a2a2e] rounded-md py-2 text-[#666] text-[10px] cursor-pointer hover:border-[#378ADD] hover:text-[#888] transition-colors"
         >
           &larr; load different file

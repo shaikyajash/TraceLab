@@ -16,275 +16,306 @@ export function buildPerServicePrompt(
     ? formatExternalTypesForPrompt(externalTypes)
     : '';
 
-  const system = `You are a senior Rust code analyzer that produces structured JSON describing a service's architecture, data flow, and execution paths.
+  const system = `You are a senior Rust code analyzer. Read the provided Rust source files and output a single JSON object describing the service architecture, data flow, and execution traces.
 
-You MUST respond with valid JSON only. No prose, no markdown fences, no explanations outside the JSON.
+╔══════════════════════════════════════════════╗
+║  OUTPUT RULE — NEVER VIOLATE                 ║
+╚══════════════════════════════════════════════╝
+1. Your ENTIRE response must be ONE raw JSON object.
+2. First character: "{". Last character: "}".
+3. No markdown fences, no prose, no // comments, no explanation outside the JSON.
+4. Output the COMPLETE JSON. Never truncate or stop early.
+5. All string values must use escaped quotes where needed. No JS-style comments inside JSON.
 
-═══════════════════════════════════════════
-SECTION 1: COMPONENT EXTRACTION (nodes)
-═══════════════════════════════════════════
+══════════════════════════════════════════════
+RULE 1 — READ EVERYTHING, EXTRACT DEEPLY
+══════════════════════════════════════════════
 
-Extract every meaningful component. A "component" is any unit where data enters, transforms, is validated, persists, or leaves the system:
+Read ALL files before writing any output. A shallow output (only route handlers and structs) is WRONG.
 
-  route_handler    — HTTP endpoint (GET /health, POST /api/items, etc)
-  middleware       — intercepts requests (auth, logging, rate limiting, CORS)
-  business_logic   — domain logic, orchestration, handler functions
-  validator        — input validation, authorization checks, constraint enforcement
-  transformer      — data shape changes (hashing, encryption, serialization, key derivation)
-  db_call          — any database operation (SELECT, INSERT, UPDATE, DELETE, migrations)
-  external_http_call — outbound HTTP to another service
-  struct / enum    — data carriers between components
-  message_queue    — async messaging (publish/subscribe, job queues)
-  function         — utility functions that don't fit above
+You MUST extract nodes for every layer:
+  a) Every HTTP route handler in the router
+  b) Every middleware (auth, logging, rate-limiting, CORS)
+  c) Every function directly called by a handler (business logic layer)
+  d) Every function those call in turn (validators, transformers, helpers)
+  e) Every database function (sqlx, diesel, sea-orm, etc.)
+  f) Every outbound HTTP call (reqwest, hyper client, ureq)
+  g) Every enum involved in serde deserialization of request/response bodies
 
-For each node, provide:
-  id            — unique, stable identifier (for route_handlers use "METHOD /path" e.g. "POST /api/items/{id}")
-  service       — the service name
-  kind          — one of the kinds above
-  name          — short human-readable name
-  input/output  — type signatures or descriptions
-  mutates_state — true if it writes to DB, filesystem, or external state
-  mutation_target — what is mutated (table name, file, etc) or null
-  defined_in    — source file path
-  description   — what this component does (1-2 sentences)
-  method        — HTTP method for route_handlers, null otherwise
-  path_pattern  — URL pattern for route_handlers, null otherwise
-  handler       — handler function path for route_handlers, null otherwise
-  example_payload — for route_handlers: a realistic JSON request body example
-  source_code   — the actual function body or struct definition (verbatim from the code)
+If a handler calls handle_foo(), handle_foo is a node. If handle_foo calls validate_bar(), validate_bar is a node. Follow the full call chain.
 
-═══════════════════════════════════════════
-SECTION 2: DATA FLOW (edges)
-═══════════════════════════════════════════
+══════════════════════════════════════════════
+RULE 2 — NODE KINDS (use exact values)
+══════════════════════════════════════════════
 
-For every CALL relationship between components, create an edge:
-  from / to          — node ids
-  payload            — describe what data flows across this edge (type, shape, key fields)
-  from_service / to_service — service names
+  route_handler      HTTP endpoint — id format: "METHOD /path/{param}"
+  middleware         Request interceptor (auth, CORS, logging)
+  business_logic     Domain logic / orchestration
+  validator          Input/auth validation, constraint checks
+  transformer        Data shape change (hashing, encryption, serialization)
+  db_call            Database operation (SELECT, INSERT, UPDATE, DELETE)
+  external_http_call Outbound HTTP to another service
+  struct             Data-carrying struct
+  enum               Enum (especially serde-deserialized ones)
+  message_queue      Async messaging
+  function           Utility that doesn't fit above
 
-CRITICAL EDGE RULES:
-- Edges represent CALL/INVOCATION relationships ONLY: "A calls B", "A dispatches to B", "A delegates to B".
-- Edges are NOT sequential execution order. Do NOT create edges like "validate_input → process_data"
-  just because they happen to run one after another inside the same parent function.
-  The parent (e.g. handle_request) should have edges to BOTH validate_input and process_data.
-- Edges MUST form a DAG (directed acyclic graph). Cycles are FORBIDDEN.
-  If function A calls B, and later function C also calls B, that's two edges INTO B — not a cycle.
-  But if A→B→C→A exists, that IS a cycle and is wrong.
-- Include ALL call edges, including conditional ones. If component A calls B only sometimes
-  (e.g. based on a match arm), still include the edge — traces clarify which paths use which edges.
-- Execution order within a function is captured by the trace steps array, NOT by edges.
+Id rules:
+  - route_handler → "GET /health", "POST /api/items/{id}"
+  - enum → "enum_TypeName"
+  - others → function or struct name as-is
 
-═══════════════════════════════════════════
-SECTION 3: MUTATIONS
-═══════════════════════════════════════════
+══════════════════════════════════════════════
+RULE 3 — EDGES (call graph, not execution order)
+══════════════════════════════════════════════
 
-Every write to persistent state:
-  id, service, kind:"mutation", mutates, via (sqlx, diesel, fs::write, etc), in_component, defined_in
+Create one edge per CALL relationship: "A calls B".
 
-═══════════════════════════════════════════
-SECTION 4: EXTERNAL PACKAGES
-═══════════════════════════════════════════
+Constraints:
+  1. Edges = call/invocation only. NOT sequential order.
+     If handle_req() calls validate() and then process(), both edges originate from handle_req:
+       handle_req → validate
+       handle_req → process
+     WRONG: validate → process  (they are siblings, not a sequence)
+  2. DAG only — no cycles. A→B→C→A is forbidden.
+  3. Include conditional edges (if A calls B only in one match arm, include A→B).
+  4. Execution order lives in trace steps, not edges.
 
-Notable crates used:
-  crate, used_in_services, purpose
+══════════════════════════════════════════════
+RULE 4 — SERDE AWARENESS
+══════════════════════════════════════════════
 
-═══════════════════════════════════════════
-SECTION 4.5: SERDE AWARENESS (critical for JSON correctness)
-═══════════════════════════════════════════
+Serde attributes change how Rust types appear in JSON:
+  #[serde(rename_all = "lowercase")]  → "MyVariant" serializes as "myvariant"
+  #[serde(rename_all = "snake_case")] → "MyVariant" serializes as "my_variant"
+  #[serde(rename_all = "camelCase")]  → "MyVariant" serializes as "myVariant"
+  #[serde(rename = "foo")]            → that variant serializes as "foo"
 
-Rust's serde determines how types serialize/deserialize to JSON. You MUST follow these rules:
+Rules:
+  - Create an enum node for EVERY enum used in request/response serde.
+  - In the node's "fields" array, set each variant's "type" to its serde-serialized JSON string value.
+  - In example_payload, use only serde-serialized values (never Rust variant names).
+  - Unknown enum variant in request → serde fails → 400. This is a real execution path to trace.
+  - Never guess variants. Use only what appears in source or EXTERNAL TYPE DEFINITIONS.
 
-RENAME RULES:
-- #[serde(rename_all = "lowercase")] → JSON values are all-lowercase: "pending" not "Pending"
-- #[serde(rename_all = "UPPERCASE")] → JSON values are all-uppercase
-- #[serde(rename_all = "camelCase")] → JSON values are camelCase
-- #[serde(rename_all = "snake_case")] → JSON values are snake_case
-- #[serde(rename = "custom")] on a variant → that variant uses "custom" in JSON
+══════════════════════════════════════════════
+RULE 5 — TRACES (invest the most effort here)
+══════════════════════════════════════════════
 
-DESERIALIZATION BEHAVIOR:
-- If a JSON request body is deserialized into a struct containing an enum field, and the
-  JSON value does NOT match any known variant (after applying rename rules), serde will
-  FAIL deserialization. This causes an error response (typically 400 Bad Request).
-- This deserialization failure is a REAL execution path. You MUST create a trace for it.
+Traces are pre-computed execution paths that drive a visual flow simulator. Quality matters.
 
-ENUM NODES:
-- For every enum that participates in request/response deserialization, include it as a
-  node with kind="enum". List ALL variants in the fields array with their serde-serialized
-  JSON values. Include the full source_code with derive macros and serde attributes.
-- If the enum is from an external crate but is used in request/response types, STILL include
-  it as a node. The scanner may provide its definition in the EXTERNAL TYPE DEFINITIONS section.
+STEP 1 — Find all distinct execution paths per route handler.
+  Two paths are distinct if they visit DIFFERENT components. At every branch point ask:
+  "Does this branch cause different components to be called?"
+  Branch patterns to find:
+    - match arms dispatching to different handler functions
+    - if/else calling different components
+    - boolean flags that gate component calls (needs_pk, is_admin, has_cache, etc.)
+    - Option/Result checks that short-circuit when None/Err
+    - Path parameter dispatch (/{action} where "initiate" vs "redeem" → different logic)
+    - Enum field dispatch (each action/type value → different handler)
+    - Auth role dispatch (admin vs user → different flow)
+    - Cached vs uncached path
 
-EXAMPLE PAYLOADS:
-- All enum values in example_payload fields MUST use the serde-serialized form.
-  e.g. if Status has #[serde(rename_all = "lowercase")], use "pending" not "Pending".
-- NEVER guess enum variants. Use only variants from the actual source code or external type definitions.
+STEP 2 — Write traces. One per distinct path. Ordering: most-specific FIRST, catch-alls LAST.
+  The trace engine tries traces in order; first one where ALL match conditions pass wins.
 
-═══════════════════════════════════════════
-SECTION 5: TRACES (critical — read carefully)
-═══════════════════════════════════════════
+  Trace fields:
+    route_id         route_handler node id
+    label            human name including the distinguishing condition
+    description      one line: what this path does and how it ends
+    example_payload  JSON object (NOT a string) that triggers this exact path
+    match            array of conditions (ALL must pass); [] = unconditional/catch-all
+    steps            ordered component visits
 
-Traces are pre-computed execution paths through the service. They power a visual flow simulator in the UI. This is the most important section.
+  Step fields:
+    node_id          id from the nodes array (must exist)
+    edge_label       data flowing IN to this step ("" for first step)
+    summary          what happens here and why — include condition evaluation result
+    when             (optional) this step is skipped if condition is false
 
-For each route_handler, you must identify EVERY distinct execution path and create a separate trace for each. Two paths are "distinct" if they visit DIFFERENT sets of components.
+STEP 3 — Condition format (used in both "match" and "when"):
+    {"field": "action",    "op": "eq",        "value": "create"}
+    {"field": "role",      "op": "in",        "value": ["admin", "editor"]}
+    {"field": "role",      "op": "not_in",    "value": ["admin"]}
+    {"field": "token",     "op": "exists"}
+    {"field": "token",     "op": "not_exists"}
+    {"field": "src_chain", "op": "eq_field",  "value": "dst_chain"}
+    {"field": "src_chain", "op": "neq_field", "value": "dst_chain"}
+  Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field
 
-HOW TO FIND DISTINCT PATHS:
-1. Start at the route_handler.
-2. Follow the code execution. At every branch point (match, if/else, early return, Option check, boolean flag), ask: "does this branch cause different components to be called?"
-3. If YES → that's a separate trace.
+STEP 4 — Parametric traces: avoid combinatorial explosion.
+  Do NOT write one trace per enum variant combination.
+  Write ONE trace and use per-step "when" conditions:
+    step_a runs when format=="json"
+    step_b runs when format=="xml"
+  At runtime, only matching steps execute.
 
-COMMON BRANCHING PATTERNS TO DETECT:
-- match on an action/type enum → each arm dispatches to different handler functions
-- if condition { call_a() } else { call_b() } → two traces
-- boolean flags (e.g. needs_encryption, is_admin) that gate whether a component runs → traces with/without that component
-- Option<T> / Result<T> checks that skip processing when None/Err → shorter trace
-- Type-dependent dispatch (e.g. different serializers for different content types)
-- Feature flags or config-driven branches
-- Type/variant dispatch (e.g. different serializers, key derivers, or processors per enum variant)
-- Batch vs single-item processing paths
-- Cached vs uncached paths (cache hit skips computation)
-- Auth role dispatch (admin vs user vs anonymous see different flows)
+STEP 5 — Required catch-all traces (LAST for each route):
+  - "Deserialization failure" trace (match: []) for unknown enum values → 400
+  - "Unauthorized / mismatch" trace (match: []) for wildcard _ arms → 401/403
 
-For each trace:
-  route_id        — the route_handler node id
-  label           — human-readable name, e.g. "Create Item" or "List Items (paginated)"
-  description     — one-line explaining what this trace does
-  example_payload — a JSON that triggers this path (with real serde values)
-  match           — (optional) array of conditions; ALL must be true for this trace to apply at runtime
-  steps           — ordered array of { node_id, edge_label, summary, when? }:
-    - node_id: the component visited
-    - edge_label: the data flowing in (empty string for the first step)
-    - summary: what happens here AND why. Include condition evaluations.
-    - when: (optional) condition — step is INCLUDED only when true. Use for branching.
+STEP 6 — Path parameter dispatch:
+  /{action} routes → trace per known action value using:
+    {"field": "action", "op": "in", "value": ["initiate", "redeem", "refund"]}
+  Add catch-all for unknown path param values.
 
-CONDITION FORMAT (used in both "match" and "when"):
-  { "field": "action", "op": "eq", "value": "create" }              — field equals value
-  { "field": "role", "op": "in", "value": ["admin","editor"] }      — field is one of values
-  { "field": "role", "op": "not_in", "value": ["admin"] }           — field is NOT in values
-  { "field": "token", "op": "exists" }                              — field is present
-  { "field": "source", "op": "eq_field", "value": "destination" }   — two fields are equal
-  Ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field
+══════════════════════════════════════════════
+OUTPUT SCHEMA
+══════════════════════════════════════════════
 
-PARAMETRIC TRACES (critical — avoid combinatorial explosion):
-DO NOT create one trace per enum variant combination. Instead, create ONE trace with conditional steps.
+The output object must have exactly these top-level keys:
+  service, nodes, edges, mutations, external_packages, traces
 
-Example: if a function dispatches to different processors based on an enum field "format":
-  { "node_id": "process_json", "when": {"field":"format","op":"eq","value":"json"}, ... }
-  { "node_id": "process_xml",  "when": {"field":"format","op":"eq","value":"xml"}, ... }
-  { "node_id": "process_csv",  "when": {"field":"format","op":"eq","value":"csv"}, ... }
-At runtime, steps where "when" is false are SKIPPED. This single trace handles ALL format variants.
+NODE — all fields required on every node (use null for optional fields with no value):
+  "id"              string    unique stable id
+  "service"         string    service name
+  "kind"            string    one of the kind values from Rule 2
+  "name"            string    short human-readable label
+  "input"           string|null  input type signature
+  "output"          string|null  output type signature
+  "mutates_state"   boolean   true if writes to DB, file, or external state
+  "mutation_target" string|null  table/resource name when mutates_state is true
+  "defined_in"      string    source file path
+  "description"     string    1-2 sentences describing behavior
+  "method"          string|null  HTTP method (route_handler only, else null)
+  "path_pattern"    string|null  URL pattern (route_handler only, else null)
+  "handler"         string|null  handler fn path (route_handler only, else null)
+  "source_code"     string|null  verbatim function or struct definition from source
+  "example_payload" string|null  JSON string of a realistic request body (route_handler only)
+  "fields"          array|null   enum: [{name, type:"serde-value"}]  struct: [{name, type}]  else: null
 
-For "match" on the trace itself, use conditions to gate when the trace applies:
-  "match": [{"field":"action","op":"eq","value":"create"}, {"field":"format","op":"in","value":["json","xml","csv"]}]
-  This ensures the trace only fires for valid inputs. Invalid inputs fall through to error traces.
+EDGE:
+  "from"         string   caller node id
+  "to"           string   callee node id
+  "payload"      string   what data flows (type name, shape, key fields)
+  "from_service" string   service name
+  "to_service"   string   service name
 
-IMPORTANT: For any input field that is an enum, add a "match" condition with op:"in" listing ALL
-valid serde variant values. This prevents the trace from matching inputs with unknown/invalid values.
-Those invalid inputs should hit the catch-all error trace instead.
+MUTATION:
+  "id"           string   unique, prefix "mut_"
+  "service"      string   service name
+  "kind"         string   always "mutation"
+  "mutates"      string   "table_name (INSERT ON CONFLICT)" style description
+  "via"          string   "sqlx::query_as", "diesel", "fs::write", etc.
+  "in_component" string   node id performing this mutation
+  "defined_in"   string   source file path
 
-TRACE ORDERING:
-- Most specific traces FIRST (more match conditions = higher priority).
-- Catch-all / error traces LAST (no match conditions — fire when nothing else matches).
-- Traces are tried in order; first match wins.
+EXTERNAL PACKAGE:
+  "crate"            string    crate name
+  "used_in_services" string[]  service names using it
+  "purpose"          string    what this crate does in this service
 
-TRACE RULES:
-- Every node_id MUST exist in the nodes array.
-- Consecutive steps do NOT need a direct edge — traces capture execution ORDER, edges capture CALL GRAPH.
-- Simple endpoints (health checks) get one trace with no match/when.
-- Deserialization failures / unknown enum values: add a catch-all trace (no match) at the END.
-- Wildcard match arms (unauthorized): add a catch-all trace at the END.
+TRACE:
+  "route_id"        string   route_handler node id
+  "label"           string   human name with distinguishing variant
+  "description"     string   one line: path + outcome
+  "example_payload" object   JSON object (not string) that triggers this path
+  "match"           array    condition objects; [] for unconditional/catch-all
+  "steps"           array    ordered step objects
 
-═══════════════════════════════════════════
-OUTPUT JSON SCHEMA (all fields required unless noted)
-═══════════════════════════════════════════
+STEP:
+  "node_id"    string   must exist in nodes array
+  "edge_label" string   data flowing in ("" for first step)
+  "summary"    string   what happens + why, include condition results
+  "when"       object   (optional) step skipped unless this condition passes
+
+══════════════════════════════════════════════
+EXAMPLE OUTPUT SHAPE (generic — replace all placeholders with real values)
+══════════════════════════════════════════════
+
 {
-  "service": {
-    "id": "service-name",
-    "kind": "service",
-    "path": "relative/path/to/service",
-    "description": "One-line description of what this service does"
-  },
+  "service": {"id": "<name>", "kind": "service", "path": "<path>", "description": "<desc>"},
   "nodes": [
-    {
-      "id": "unique_stable_id (for routes: 'METHOD /path')",
-      "service": "service-name",
-      "kind": "route_handler | middleware | business_logic | validator | transformer | db_call | external_http_call | struct | enum | message_queue | function",
-      "name": "Human Readable Name",
-      "input": "input type signature or description, or null",
-      "output": "output type signature or description, or null",
-      "mutates_state": false,
-      "mutation_target": "table/file/state being mutated, or null",
-      "defined_in": "src/path/to/file.rs",
-      "description": "What this component does (1-2 sentences)",
-      "method": "GET | POST | PUT | DELETE | PATCH, or null (route_handlers only)",
-      "path_pattern": "/api/path/{param}, or null (route_handlers only)",
-      "handler": "module::path::to_handler, or null (route_handlers only)",
-      "fields": [{"name": "field_name", "type": "field_type"}],
-      "source_code": "fn actual_code() { ... } (verbatim from source)",
-      "example_payload": "realistic JSON string for route_handlers, or null",
-      "port": 8080
-    }
+    {"id": "POST /items/{id}", "service": "<svc>", "kind": "route_handler", "name": "<Name>",
+     "input": "<InputType>", "output": "<OutputType>", "mutates_state": true,
+     "mutation_target": "<table>", "defined_in": "src/handlers.rs",
+     "description": "<what it does>", "method": "POST", "path_pattern": "/items/{id}",
+     "handler": "<module::fn>", "source_code": "<verbatim fn body>",
+     "example_payload": "{\"field\":\"value\"}", "fields": null},
+    {"id": "<middleware_id>", "service": "<svc>", "kind": "middleware", "name": "<Name>",
+     "input": "Request", "output": "Request with <Ext> or <error>", "mutates_state": false,
+     "mutation_target": null, "defined_in": "src/auth.rs", "description": "<desc>",
+     "method": null, "path_pattern": null, "handler": null,
+     "source_code": "<verbatim>", "example_payload": null, "fields": null},
+    {"id": "<fn_name>", "service": "<svc>", "kind": "business_logic", "name": "<Name>",
+     "input": "<type>", "output": "<type>", "mutates_state": false, "mutation_target": null,
+     "defined_in": "src/domain.rs", "description": "<desc>", "method": null,
+     "path_pattern": null, "handler": null, "source_code": "<verbatim>",
+     "example_payload": null, "fields": null},
+    {"id": "<validate_fn>", "service": "<svc>", "kind": "validator", "name": "<Name>",
+     "input": "<type>", "output": "Result<(), <Err>>", "mutates_state": false,
+     "mutation_target": null, "defined_in": "src/validate.rs", "description": "<desc>",
+     "method": null, "path_pattern": null, "handler": null, "source_code": "<verbatim>",
+     "example_payload": null, "fields": null},
+    {"id": "<db_fn>", "service": "<svc>", "kind": "db_call", "name": "<Name>",
+     "input": "<params>", "output": "Result<<Record>>", "mutates_state": true,
+     "mutation_target": "<table>", "defined_in": "src/store.rs", "description": "<SQL op>",
+     "method": null, "path_pattern": null, "handler": null, "source_code": "<verbatim>",
+     "example_payload": null, "fields": null},
+    {"id": "enum_<Name>", "service": "<svc>", "kind": "enum", "name": "<Name>",
+     "input": null, "output": null, "mutates_state": false, "mutation_target": null,
+     "defined_in": "src/types.rs",
+     "description": "#[serde(rename_all=\"<rule>\")]. Unknown values fail serde.",
+     "method": null, "path_pattern": null, "handler": null,
+     "source_code": "<verbatim derive + serde attrs + variants>", "example_payload": null,
+     "fields": [{"name": "<Variant>", "type": "\"<serde-value>\""}]}
   ],
   "edges": [
-    {
-      "from": "source_node_id",
-      "to": "target_node_id",
-      "payload": "description of data flowing across this edge",
-      "from_service": "service-name",
-      "to_service": "service-name"
-    }
+    {"from": "<caller>", "to": "<callee>", "payload": "<data flowing>",
+     "from_service": "<svc>", "to_service": "<svc>"}
   ],
   "mutations": [
-    {
-      "id": "unique_mutation_id",
-      "service": "service-name",
-      "kind": "mutation",
-      "mutates": "what is being mutated (table name, column, file)",
-      "via": "mechanism (sqlx::query, diesel, fs::write, reqwest, etc)",
-      "in_component": "node_id of the component that performs this mutation",
-      "defined_in": "src/path/to/file.rs"
-    }
+    {"id": "mut_<unique>", "service": "<svc>", "kind": "mutation",
+     "mutates": "<table> (INSERT)", "via": "sqlx::query_as",
+     "in_component": "<db_call_id>", "defined_in": "src/store.rs"}
   ],
   "external_packages": [
-    {
-      "crate": "crate_name",
-      "used_in_services": ["service-name"],
-      "purpose": "what this crate is used for in this service"
-    }
+    {"crate": "<name>", "used_in_services": ["<svc>"], "purpose": "<what it does>"}
   ],
   "traces": [
     {
-      "route_id": "the route_handler node id this trace starts from",
-      "label": "Human-readable trace name",
-      "description": "One-line: what this trace does",
-      "example_payload": {"action": "create", "format": "json"},
+      "route_id": "POST /items/{id}",
+      "label": "<Action> — <specific condition>",
+      "description": "<one line: path + outcome>",
+      "example_payload": {"<field>": "<value-that-triggers-this-path>"},
       "match": [
-        {"field": "action", "op": "eq", "value": "create"},
-        {"field": "format", "op": "in", "value": ["json","xml","csv"]}
+        {"field": "<field>", "op": "eq", "value": "<value>"},
+        {"field": "<enum_field>", "op": "in", "value": ["<v1>", "<v2>"]}
       ],
       "steps": [
-        {
-          "node_id": "component node_id visited at this step",
-          "edge_label": "data flowing into this step (empty string for first step)",
-          "summary": "What happens here + why. Include condition evaluation."
-        },
-        {
-          "node_id": "process_json",
-          "edge_label": "parsed input",
-          "summary": "Processes JSON format input.",
-          "when": {"field": "format", "op": "eq", "value": "json"}
-        }
+        {"node_id": "<id>", "edge_label": "", "summary": "<what + why>"},
+        {"node_id": "<id>", "edge_label": "<data>", "summary": "<what + why>",
+         "when": {"field": "<f>", "op": "eq", "value": "<v>"}}
+      ]
+    },
+    {
+      "route_id": "POST /items/{id}",
+      "label": "Deserialization failure — invalid input",
+      "description": "Unknown enum variant in body. serde fails → 400.",
+      "example_payload": {"<field>": "<unknown-value>"},
+      "match": [],
+      "steps": [
+        {"node_id": "POST /items/{id}", "edge_label": "",
+         "summary": "serde_json deserialization fails on unknown variant → 400 Bad Request."}
       ]
     }
   ]
 }`;
 
   const externalTypesSection = externalTypesContext
-    ? `\n\n═══════════════════════════════════════════\nEXTERNAL TYPE DEFINITIONS (resolved from dependency crates)\n═══════════════════════════════════════════\n\nThe following types are used in this service but defined in external crates.\nUse these EXACT definitions for enum variants, struct fields, and serde behavior.\nDo NOT guess variants — only use what is listed here.\n\n${externalTypesContext}`
+    ? `\n\nEXTERNAL TYPE DEFINITIONS\n${'─'.repeat(40)}\nThe following types are defined in external crates used by this service.\nUse ONLY these exact definitions for enum variants, struct fields, and serde behavior.\nDo NOT guess or invent anything not listed here.\n\n${externalTypesContext}`
     : '';
 
-  const user = `Analyze the following Rust service "${service.name}" (located at "${service.path}") and extract all components, data flow edges, mutations, external packages, and execution traces.
+  const user = `Analyze the Rust service "${service.name}" (path: "${service.path}").
 
-Pay special attention to branching logic — match arms, if/else chains, boolean flags, Option/Result checks, type-based dispatch — anywhere different input values cause different components to be called. Each distinct path needs its own trace.
+BEFORE writing any output, do this analysis mentally:
+  1. Read every file completely.
+  2. Trace every call chain: route handlers → business logic → validators/transformers → db_calls.
+  3. Identify every branch point in every handler (match arms, if/else, flags, Option/Result).
+  4. List all enums used in serde deserialization and confirm their serde-serialized variant values.
+
+THEN produce the complete JSON object. Do not truncate. Do not stop early.
 
 ${fileList}${externalTypesSection}`;
 
@@ -298,45 +329,45 @@ export function buildCrossServicePrompt(
     nodes: Array<{ id: string; kind: string; name: string }>;
   }>,
 ): { system: string; user: string } {
-  const system = `You are a Rust workspace analyzer. Given summaries of multiple services, identify all cross-service interactions.
+  const system = `You are a Rust workspace analyzer. Identify all cross-service interactions.
 
-You MUST respond with valid JSON only. No prose, no markdown fences, no explanations.
+OUTPUT RULE: ONE raw JSON object only. First character "{", last character "}". No markdown, no prose, no comments. Complete output — do not truncate.
 
-Output JSON schema:
+Output shape:
 {
   "cross_service_calls": [
     {
-      "id": "unique_id",
+      "id": "<unique_id>",
       "kind": "cross_service_call",
-      "from_service": "service-a",
-      "to_service": "service-b",
-      "via": "mechanism (reqwest::post, shared struct, message queue, shared database, etc)",
-      "endpoint": "endpoint if HTTP call, or null",
-      "payload_in": "input type or null",
-      "payload_out": "output type or null",
-      "defined_in": "file/path.rs"
+      "from_service": "<service-a>",
+      "to_service": "<service-b>",
+      "via": "<reqwest::post or shared_db or message_queue or shared_struct>",
+      "endpoint": "<url path or null>",
+      "payload_in": "<InputType or null>",
+      "payload_out": "<OutputType or null>",
+      "defined_in": "<src/path/file.rs>"
     }
   ]
 }
 
 Look for:
-- HTTP client calls to other services (reqwest, hyper client, etc)
-- Shared structs/enums used across services
-- Message queue publish/subscribe patterns
-- Shared database access patterns
-- Direct crate dependencies between services`;
+  - HTTP client calls (reqwest, hyper, ureq) to URLs matching another service's routes
+  - Shared structs/enums from a common crate used by multiple services
+  - Message queue publish/subscribe patterns between services
+  - Shared database tables accessed by multiple services
+  - Direct crate dependencies (service-a imports service-b as a lib)`;
 
   const summaryText = perServiceSummaries
     .map((s) => `Service: ${s.serviceName}\nComponents: ${JSON.stringify(s.nodes, null, 2)}`)
     .join('\n\n---\n\n');
 
-  const user = `These are the services in the workspace: ${serviceNames.join(', ')}
+  const user = `Services in this workspace: ${serviceNames.join(', ')}
 
-Here are the component summaries for each service:
+Component summaries:
 
 ${summaryText}
 
-Identify all cross-service calls and shared data patterns.`;
+Identify all cross-service calls and shared data patterns. Return the complete JSON object.`;
 
   return { system, user };
 }

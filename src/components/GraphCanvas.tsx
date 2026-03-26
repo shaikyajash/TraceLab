@@ -1,7 +1,17 @@
-"use client";
+'use client';
 
-import type { ComponentNode, PayloadEdge } from "@/types";
-import { NODE_W, NODE_H, KIND_COLORS, KIND_LABELS, CANVAS_WIDTH, CANVAS_HEIGHT, MIN_SCALE, MAX_SCALE, SCALE_STEP } from "@/constants";
+import type { ComponentNode, PayloadEdge } from '@/types';
+import {
+  NODE_W,
+  NODE_H,
+  KIND_COLORS,
+  KIND_LABELS,
+  CANVAS_WIDTH,
+  CANVAS_HEIGHT,
+  MIN_SCALE,
+  MAX_SCALE,
+  SCALE_STEP,
+} from '@/constants';
 
 interface GraphCanvasProps {
   coreNodes: ComponentNode[];
@@ -65,9 +75,9 @@ export default function GraphCanvas(props: GraphCanvasProps) {
     <div
       style={{
         flex: 1,
-        position: "relative",
-        overflow: "hidden",
-        cursor: isPanning ? "grabbing" : "grab",
+        position: 'relative',
+        overflow: 'hidden',
+        cursor: isPanning ? 'grabbing' : 'grab',
       }}
       onMouseDown={handleCanvasMouseDown}
       onMouseMove={handleCanvasMouseMove}
@@ -79,31 +89,59 @@ export default function GraphCanvas(props: GraphCanvasProps) {
       <div
         id="graph-wrap"
         style={{
-          position: "absolute",
+          position: 'absolute',
           top: 0,
           left: 0,
           transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
-          transformOrigin: "0 0",
+          transformOrigin: '0 0',
         }}
       >
         {/* SVG edges */}
         <svg
           style={{
-            position: "absolute",
+            position: 'absolute',
             top: 0,
             left: 0,
             width: CANVAS_WIDTH,
             height: CANVAS_HEIGHT,
-            overflow: "visible",
-            pointerEvents: "none",
+            overflow: 'visible',
+            pointerEvents: 'none',
           }}
         >
           <defs>
-            <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-              <path d="M2 1L8 5L2 9" fill="none" stroke="#2a4a7a" strokeWidth="1.5" strokeLinecap="round" />
+            <marker
+              id="arr"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path
+                d="M2 1L8 5L2 9"
+                fill="none"
+                stroke="#2a4a7a"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
             </marker>
-            <marker id="arr-lit" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-              <path d="M2 1L8 5L2 9" fill="none" stroke="#378ADD" strokeWidth="1.5" strokeLinecap="round" />
+            <marker
+              id="arr-lit"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path
+                d="M2 1L8 5L2 9"
+                fill="none"
+                stroke="#378ADD"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
             </marker>
           </defs>
           {coreEdges.map((edge, i) => {
@@ -120,14 +158,14 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 key={i}
                 d={edgePath(x1, y1, x2, y2)}
                 fill="none"
-                stroke={isLit ? "#378ADD" : "#1a3a5c"}
+                stroke={isLit ? '#378ADD' : '#1a3a5c'}
                 strokeWidth={isLit ? 2 : 1.5}
                 strokeDasharray="5 4"
-                markerEnd={isLit ? "url(#arr-lit)" : "url(#arr)"}
+                markerEnd={isLit ? 'url(#arr-lit)' : 'url(#arr)'}
                 style={{
-                  animation: "dash 1.2s linear infinite",
+                  animation: 'dash 1.2s linear infinite',
                   animationDelay: `${i * 0.15}s`,
-                  transition: "stroke 0.3s, stroke-width 0.3s",
+                  transition: 'stroke 0.3s, stroke-width 0.3s',
                 }}
               />
             );
@@ -149,8 +187,8 @@ export default function GraphCanvas(props: GraphCanvasProps) {
             <div
               key={node.id}
               data-node
-              onClick={(e) => { 
-                e.stopPropagation(); 
+              onClick={(e) => {
+                e.stopPropagation();
                 if (!isGreyedOut) {
                   setSelectedId(node.id);
                 }
@@ -161,30 +199,27 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 top: pos.y,
                 width: NODE_W,
                 minHeight: NODE_H,
-                background: "#111114",
-                border: isHead 
-                  ? `2px solid ${colors.border}` 
-                  : isSelected 
-                    ? "2px solid #378ADD" 
+                background: '#111114',
+                border: isHead
+                  ? `2px solid ${colors.border}`
+                  : isSelected
+                    ? '2px solid #378ADD'
                     : isTraceActive
                       ? `2px solid ${colors.border}66`
-                      : "1px solid #2a2a2e",
+                      : '1px solid #2a2a2e',
                 borderRadius: 10,
                 opacity: isGreyedOut ? 0.25 : 1,
-                cursor: isGreyedOut ? "not-allowed" : "pointer",
+                cursor: isGreyedOut ? 'not-allowed' : 'pointer',
               }}
             >
               {/* Top colored strip */}
-              <div 
-                className="h-1 w-full"
-                style={{ background: colors.border }}
-              />
+              <div className="h-1 w-full" style={{ background: colors.border }} />
 
               {/* Content */}
               <div className="p-3">
                 {/* Badges row */}
                 <div className="flex items-center gap-1.5 mb-2.5">
-                  <div 
+                  <div
                     className="text-[8px] px-2 py-1 rounded-md font-bold tracking-wider"
                     style={{ background: colors.badgeBg, color: colors.badgeText }}
                   >
@@ -211,7 +246,9 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 {/* Description */}
                 {node.description && (
                   <div className="text-[9px] text-[#777] leading-relaxed">
-                    {node.description.length > 85 ? node.description.slice(0, 85) + "..." : node.description}
+                    {node.description.length > 85
+                      ? node.description.slice(0, 85) + '...'
+                      : node.description}
                   </div>
                 )}
               </div>
@@ -223,12 +260,12 @@ export default function GraphCanvas(props: GraphCanvasProps) {
       {/* Toolbar */}
       <div className="absolute top-3 left-3 flex gap-2 z-10">
         {[
-          { label: "fit view", action: fitView },
-          { label: "+ zoom", action: () => setScale((s) => Math.min(MAX_SCALE, s + SCALE_STEP)) },
-          { label: "– zoom", action: () => setScale((s) => Math.max(MIN_SCALE, s - SCALE_STEP)) },
+          { label: 'fit view', action: fitView },
+          { label: '+ zoom', action: () => setScale((s) => Math.min(MAX_SCALE, s + SCALE_STEP)) },
+          { label: '– zoom', action: () => setScale((s) => Math.max(MIN_SCALE, s - SCALE_STEP)) },
         ].map((btn, i) => (
-          <button 
-            key={i} 
+          <button
+            key={i}
             onClick={btn.action}
             className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-medium hover:border-[#378ADD] hover:text-[#aaa] transition-colors"
           >
