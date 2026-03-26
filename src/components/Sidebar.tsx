@@ -427,6 +427,41 @@ export default function Sidebar(props: SidebarProps) {
                         {step.description && (
                           <div className="text-[9px] text-[#666] leading-relaxed">{step.description}</div>
                         )}
+                        {(step.inputType || step.outputType) && (
+                          <div className="flex gap-3 mt-1.5 flex-wrap">
+                            {step.inputType && (
+                              <div className="flex items-center gap-1">
+                                <span className="text-[7px] text-[#444] font-bold tracking-wide">IN</span>
+                                <code className="text-[8px] text-[#556] bg-[#0d0d0f] px-1 py-0.5 rounded">{step.inputType}</code>
+                              </div>
+                            )}
+                            {step.outputType && (
+                              <div className="flex items-center gap-1">
+                                <span className="text-[7px] text-[#444] font-bold tracking-wide">OUT</span>
+                                <code className="text-[8px] text-[#556] bg-[#0d0d0f] px-1 py-0.5 rounded">{step.outputType}</code>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {(step.inputPayload !== undefined || step.outputPayload !== undefined) && (
+                          <div className="mt-2 space-y-1.5">
+                            {step.inputPayload !== undefined && (
+                              <div>
+                                <div className="text-[7px] text-[#444] font-bold tracking-wide mb-0.5">EXAMPLE INPUT</div>
+                                <pre className="text-[8px] text-[#778] bg-[#0d0d0f] rounded p-1.5 overflow-auto max-h-20 leading-relaxed whitespace-pre-wrap break-all">{JSON.stringify(step.inputPayload, null, 2)}</pre>
+                              </div>
+                            )}
+                            {step.outputPayload !== undefined && (
+                              <div>
+                                <div className="text-[7px] text-[#1D9E75] font-bold tracking-wide mb-0.5">EXAMPLE OUTPUT</div>
+                                <pre className="text-[8px] text-[#778] bg-[#0d0d0f] rounded p-1.5 overflow-auto max-h-20 leading-relaxed whitespace-pre-wrap break-all">{JSON.stringify(step.outputPayload, null, 2)}</pre>
+                              </div>
+                            )}
+                            {step.diffSummary && (
+                              <div className="text-[8px] text-[#555] italic">{step.diffSummary}</div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     </div>
                   );

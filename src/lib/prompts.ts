@@ -142,7 +142,13 @@ What to put in the node:
   - name: short label, e.g. "PendingOrdersAdapter"
   - description: "Delegates to <ExternalType> from crate <crate_name>. Returns <ReturnType>. This is the boundary to an external service — execution continues outside this codebase."
   - input/output: use the actual Rust types from the signature
-  - The call chain ENDS here — do not fabricate further internal steps
+
+CRITICAL — The call chain ends ONLY at the true external boundary (the line that calls an external crate).
+  - If the adapter method calls other helper functions defined in THESE source files BEFORE hitting the
+    external call, those helpers are NOT external. They are internal nodes and MUST be traced.
+  - Only stop when you reach a line like: self.client.get(url).send().await or reqwest::get(...), etc.
+  - Example: if adapter calls self.build_url() then self.client.post(url), the build_url() is an
+    internal node that must be extracted. Only self.client.post(...) is the true external leaf.
 
 Edges:
   - Add an edge from the internal function that calls the adapter → the adapter node
@@ -150,6 +156,37 @@ Edges:
 
 External packages:
   - Add an entry to external_packages for the external crate with its purpose
+
+══════════════════════════════════════════════
+RULE 7 — RUST TRAIT DISPATCH (follow concrete implementations)
+══════════════════════════════════════════════
+
+Rust code often calls methods on trait objects (Box<dyn Trait>, Arc<dyn Trait>, impl Trait).
+The trace MUST follow through to the concrete struct implementation, not stop at the trait definition.
+
+How to handle trait calls:
+  1. When you see code like: self.provider.get_chains(), self.executor.call(), self.store.insert()
+     where the field type is a trait → search ALL source files for:
+       impl TraitName for ConcreteType { ... }
+     blocks and trace through the concrete method body.
+  2. Create a node for ConcreteType::method_name (NOT the trait itself).
+  3. Continue tracing from inside the concrete method — follow ITS calls recursively.
+  4. Only stop when you reach a true external crate call or a function with no source visible.
+  5. If multiple concrete implementations exist (e.g. HttpProvider and MockProvider):
+     - Extract nodes for ALL of them
+     - Use "when" conditions in traces to select between them based on context
+
+What NOT to do:
+  - Do NOT create a node for the trait method signature itself
+  - Do NOT stop at a function just because it returns a trait object or takes impl Trait
+  - Do NOT skip tracing because a struct "looks like" an adapter — check its source_code first
+
+Example of correct tracing:
+  Code:  self.executor_provider.get_chains(base_url).await
+  Trait: trait ExecutorProvider { async fn get_chains(&self, url: &str) -> Result<Vec<Chain>>; }
+  Impl:  impl ExecutorProvider for HttpExecutorProvider { fn get_chains(...) { self.client.get(...).send()... }}
+  CORRECT: create node HttpExecutorProvider::get_chains (external_http_call, leaf — uses reqwest)
+  WRONG:   create node for ExecutorProvider::get_chains (trait method — not a real callable node)
 
 ══════════════════════════════════════════════
 RULE 5 — TRACES (most critical section)
@@ -257,6 +294,12 @@ NODE — all fields required on every node (use null for optional fields with no
   "handler"         string|null  handler fn path (route_handler only, else null)
   "source_code"     string|null  verbatim function or struct definition from source
   "example_payload" string|null  JSON string of a realistic request body (route_handler only)
+  "example_input"   object|null  realistic example JSON of data flowing INTO this node (all kinds).
+                                 Generate based on the function's input type and logic.
+                                 null only if input type is () or the node takes no data.
+  "example_output"  object|null  realistic example JSON of data flowing OUT of this node (all kinds).
+                                 Generate based on the return type and source code logic.
+                                 null only if return type is () or void.
   "fields"          array|null   enum: [{name, type:"serde-value"}]  struct: [{name, type}]  else: null
 
 EDGE:
@@ -306,33 +349,39 @@ EXAMPLE OUTPUT SHAPE (generic — replace all placeholders with real values)
      "mutation_target": "<table>", "defined_in": "src/handlers.rs",
      "description": "<what it does>", "method": "POST", "path_pattern": "/items/{id}",
      "handler": "<module::fn>", "source_code": "<verbatim fn body>",
-     "example_payload": "{\"field\":\"value\"}", "fields": null},
+     "example_payload": "{\"field\":\"value\"}",
+     "example_input": {"field": "value"}, "example_output": {"result": "value"}, "fields": null},
     {"id": "<middleware_id>", "service": "<svc>", "kind": "middleware", "name": "<Name>",
      "input": "Request", "output": "Request with <Ext> or <error>", "mutates_state": false,
      "mutation_target": null, "defined_in": "src/auth.rs", "description": "<desc>",
      "method": null, "path_pattern": null, "handler": null,
-     "source_code": "<verbatim>", "example_payload": null, "fields": null},
+     "source_code": "<verbatim>", "example_payload": null,
+     "example_input": {"headers": {"Authorization": "Bearer <token>"}}, "example_output": {"auth_type": "<type>", "user_id": "<id>"}, "fields": null},
     {"id": "<fn_name>", "service": "<svc>", "kind": "business_logic", "name": "<Name>",
      "input": "<type>", "output": "<type>", "mutates_state": false, "mutation_target": null,
      "defined_in": "src/domain.rs", "description": "<desc>", "method": null,
      "path_pattern": null, "handler": null, "source_code": "<verbatim>",
-     "example_payload": null, "fields": null},
+     "example_payload": null,
+     "example_input": {"<input_field>": "<value>"}, "example_output": {"<output_field>": "<value>"}, "fields": null},
     {"id": "<validate_fn>", "service": "<svc>", "kind": "validator", "name": "<Name>",
      "input": "<type>", "output": "Result<(), <Err>>", "mutates_state": false,
      "mutation_target": null, "defined_in": "src/validate.rs", "description": "<desc>",
      "method": null, "path_pattern": null, "handler": null, "source_code": "<verbatim>",
-     "example_payload": null, "fields": null},
+     "example_payload": null,
+     "example_input": {"<field>": "<valid-value>"}, "example_output": null, "fields": null},
     {"id": "<db_fn>", "service": "<svc>", "kind": "db_call", "name": "<Name>",
      "input": "<params>", "output": "Result<<Record>>", "mutates_state": true,
      "mutation_target": "<table>", "defined_in": "src/store.rs", "description": "<SQL op>",
      "method": null, "path_pattern": null, "handler": null, "source_code": "<verbatim>",
-     "example_payload": null, "fields": null},
+     "example_payload": null,
+     "example_input": {"<param>": "<value>"}, "example_output": {"id": "<id>", "<field>": "<value>"}, "fields": null},
     {"id": "enum_<Name>", "service": "<svc>", "kind": "enum", "name": "<Name>",
      "input": null, "output": null, "mutates_state": false, "mutation_target": null,
      "defined_in": "src/types.rs",
      "description": "#[serde(rename_all=\"<rule>\")]. Unknown values fail serde.",
      "method": null, "path_pattern": null, "handler": null,
      "source_code": "<verbatim derive + serde attrs + variants>", "example_payload": null,
+     "example_input": null, "example_output": null,
      "fields": [{"name": "<Variant>", "type": "\"<serde-value>\""}]}
   ],
   "edges": [

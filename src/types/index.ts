@@ -28,6 +28,9 @@ export interface TraceStep {
   edgeLabel: string;
   inputType: string | null; // node.input type signature
   outputType: string | null; // node.output type signature
+  inputPayload?: unknown;  // example data flowing in (from LLM simulation)
+  outputPayload?: unknown; // example data flowing out (from LLM simulation)
+  diffSummary?: string;    // what changed between input and output
 }
 
 export interface Position {

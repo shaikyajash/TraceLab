@@ -22,7 +22,8 @@
       "Bash(done)",
       "Bash(git checkout:*)",
       "Bash(git add:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(python3 -c \"import json,sys; data=json.load\\(sys.stdin\\); kinds=set\\(n[''''kind''''] for n in data[''''nodes'''']\\); print\\(''''Node kinds:'''', sorted\\(kinds\\)\\); print\\(''''Total nodes:'''', len\\(data[''''nodes'''']\\)\\); print\\(''''Total traces:'''', len\\(data.get\\(''''traces'''', []\\)\\)\\)\")"
     ]
   }
 }

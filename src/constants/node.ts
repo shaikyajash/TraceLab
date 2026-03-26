@@ -16,6 +16,8 @@ export const CORE_KINDS = new Set([
   "transformer",
   "validator",
   "db_call",
+  "external_http_call",
+  "function",
 ]);
 
 // Node kind colors
@@ -50,13 +52,24 @@ export const KIND_COLORS: Record<string, NodeColors> = {
     badgeBg: "#F5C4B3", 
     badgeText: "#712B13" 
   },
-  db_call: { 
-    bg: "#001e18", 
-    border: "#0F6E56", 
-    badgeBg: "#9FE1CB", 
-    badgeText: "#085041" 
+  db_call: {
+    bg: "#001e18",
+    border: "#0F6E56",
+    badgeBg: "#9FE1CB",
+    badgeText: "#085041"
   },
-
+  external_http_call: {
+    bg: "#1a1000",
+    border: "#B37F00",
+    badgeBg: "#FFE28A",
+    badgeText: "#7A5500",
+  },
+  function: {
+    bg: "#111118",
+    border: "#4A5568",
+    badgeBg: "#CBD5E0",
+    badgeText: "#2D3748",
+  },
 };
 
 // Node kind labels
@@ -67,4 +80,6 @@ export const KIND_LABELS: Record<string, string> = {
   transformer: "TRANSFORM",
   validator: "VALIDATOR",
   db_call: "DB",
+  external_http_call: "EXT HTTP",
+  function: "FUNC",
 };

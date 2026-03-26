@@ -64,6 +64,7 @@ export interface ComponentNode {
     | 'struct'
     | 'enum'
     | 'message_queue'
+    | 'function'
 
   name: string;
   input?: string;
@@ -79,6 +80,8 @@ export interface ComponentNode {
   used_by_services?: string[];
   source_code?: string;
   example_payload?: string;
+  example_input?: Record<string, unknown> | null;
+  example_output?: Record<string, unknown> | null;
   port?: number;
 }
 

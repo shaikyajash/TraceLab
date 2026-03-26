@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import type { ComponentsGraph, ComponentNode, PayloadEdge, ScanProgress, StepCondition, TraceStep } from "@/types";
+import type { ComponentsGraph, ComponentNode, PayloadEdge, ScanProgress, StepCondition, TraceStep, SimulationEvent } from "@/types";
 import {
   CORE_KINDS,
   NODE_W,
@@ -604,6 +604,60 @@ export default function Home() {
 
     setIsTracing(false);
     setTimeout(() => setTraceHeadId(null), TRACE_HEAD_CLEAR_DELAY);
+
+    // Background: call /api/simulate to populate example input/output per step
+    ;(async () => {
+      try {
+        const res = await fetch("/api/simulate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            graph,
+            start_node_id: traceRouteId,
+            initial_payload: payload,
+            breakpoints: [],
+          }),
+        });
+        if (!res.ok || !res.body) return;
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        let simIdx = 0;
+
+        outer: while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const event = JSON.parse(line) as SimulationEvent;
+              if (event.type === "step" && event.step) {
+                const s = event.step;
+                if (s.node_id === "__trace_selected__") continue;
+                const idx = simIdx++;
+                setTraceSteps((prev) => {
+                  if (idx >= prev.length) return prev;
+                  const updated = [...prev];
+                  updated[idx] = {
+                    ...updated[idx],
+                    inputPayload: s.input_payload,
+                    outputPayload: s.output_payload,
+                    diffSummary: s.diff_summary,
+                  };
+                  return updated;
+                });
+              } else if (event.type === "complete" || event.type === "error") {
+                break outer;
+              }
+            } catch { /* skip malformed line */ }
+          }
+        }
+      } catch { /* silent — payloads are optional */ }
+    })();
   }, [traceRouteId, graph, coreEdges, coreNodeIds, nodeMap, reqBody]);
 
   const clearTrace = useCallback(() => {
