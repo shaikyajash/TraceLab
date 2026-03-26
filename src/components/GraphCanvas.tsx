@@ -17,6 +17,13 @@ interface GraphCanvasProps {
   traceSteps: TraceStep[];
   traceVisible: number;
   isSidebarCollapsed: boolean;
+  breakpoints: Set<string>;
+  toggleBreakpoint: (nodeId: string) => void;
+  setBreakpoints: React.Dispatch<React.SetStateAction<Set<string>>>;
+  isPausedAtBreakpoint: boolean;
+  currentBreakpointId: string | null;
+  resumeSimulation: () => void;
+  skipBreakpoint: () => void;
   toggleSidebar: () => void;
   setSelectedId: (id: string | null) => void;
   handleCanvasMouseDown: (e: React.MouseEvent) => void;
@@ -50,6 +57,13 @@ export default function GraphCanvas(props: GraphCanvasProps) {
     traceSteps,
     traceVisible,
     isSidebarCollapsed,
+    breakpoints,
+    toggleBreakpoint,
+    setBreakpoints,
+    isPausedAtBreakpoint,
+    currentBreakpointId,
+    resumeSimulation,
+    skipBreakpoint,
     toggleSidebar,
     setSelectedId,
     handleCanvasMouseDown,
@@ -69,6 +83,42 @@ export default function GraphCanvas(props: GraphCanvasProps) {
     const existing = nodeStepMap.get(step.nodeId) || [];
     nodeStepMap.set(step.nodeId, [...existing, index + 1]);
   });
+
+  // Create a map of function steps that appear between nodes (not in coreNodes)
+  const functionSteps = traceSteps.slice(0, traceVisible).filter(
+    (step) => step.kind === "function" && !coreNodes.some(n => n.id === step.nodeId)
+  );
+
+  // Map functions to edges they belong to (between which two nodes)
+  const edgeFunctions = new Map<string, typeof functionSteps>();
+  for (let i = 0; i < traceSteps.slice(0, traceVisible).length; i++) {
+    const step = traceSteps[i];
+    if (step.kind === "function" && !coreNodes.some(n => n.id === step.nodeId)) {
+      // Find the previous and next core nodes
+      let prevNodeId = null;
+      let nextNodeId = null;
+
+      for (let j = i - 1; j >= 0; j--) {
+        if (coreNodes.some(n => n.id === traceSteps[j].nodeId)) {
+          prevNodeId = traceSteps[j].nodeId;
+          break;
+        }
+      }
+
+      for (let j = i + 1; j < traceSteps.slice(0, traceVisible).length; j++) {
+        if (coreNodes.some(n => n.id === traceSteps[j].nodeId)) {
+          nextNodeId = traceSteps[j].nodeId;
+          break;
+        }
+      }
+
+      if (prevNodeId && nextNodeId) {
+        const edgeKey = `${prevNodeId}->${nextNodeId}`;
+        const existing = edgeFunctions.get(edgeKey) || [];
+        edgeFunctions.set(edgeKey, [...existing, step]);
+      }
+    }
+  }
 
   const traceEdgeSet = new Set<string>();
   if (activeTraceIds.size > 0) {
@@ -154,6 +204,57 @@ export default function GraphCanvas(props: GraphCanvasProps) {
           })}
         </svg>
 
+        {/* Function bubbles on edges */}
+        {coreEdges.map((edge, i) => {
+          const fromPos = positions.get(edge.from);
+          const toPos = positions.get(edge.to);
+          if (!fromPos || !toPos) return null;
+
+          const edgeKey = `${edge.from}->${edge.to}`;
+          const functions = edgeFunctions.get(edgeKey);
+          if (!functions || functions.length === 0) return null;
+
+          const x1 = fromPos.x + NODE_W / 2;
+          const y1 = fromPos.y + NODE_H;
+          const x2 = toPos.x + NODE_W / 2;
+          const y2 = toPos.y;
+
+          // Calculate midpoint on the bezier curve (approximate)
+          const midY = (y1 + y2) / 2;
+          const midX = (x1 + x2) / 2;
+
+          return (
+            <div
+              key={`func-${i}`}
+              className="absolute pointer-events-auto group"
+              style={{
+                left: midX - 12,
+                top: midY - 12,
+                zIndex: 5,
+              }}
+            >
+              <div className="w-6 h-6 rounded-full bg-[#854F0B] border-2 border-[#0d0d0f] flex items-center justify-center cursor-pointer hover:scale-110 transition-transform"
+                style={{
+                  boxShadow: "0 2px 8px rgba(133, 79, 11, 0.4)"
+                }}
+              >
+                <span className="text-[8px] font-bold text-white">{functions.length}</span>
+              </div>
+
+              {/* Tooltip on hover */}
+              <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover:block whitespace-nowrap z-50">
+                <div className="bg-[#111114] border border-[#854F0B] rounded-md px-3 py-2 shadow-lg">
+                  {functions.map((fn, idx) => (
+                    <div key={idx} className="text-[10px] text-[#ddd] font-medium">
+                      {fn.name}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+
         {/* Nodes */}
         {coreNodes.map((node) => {
           const pos = positions.get(node.id);
@@ -165,19 +266,38 @@ export default function GraphCanvas(props: GraphCanvasProps) {
           const isHead = traceHeadId === node.id;
           const isGreyedOut = activeTraceIds.size > 0 && !isTraceActive;
           const stepNumbers = nodeStepMap.get(node.id) || [];
+          const isBreakpoint = breakpoints.has(node.id);
+          const isPausedHere = isPausedAtBreakpoint && currentBreakpointId === node.id;
 
           return (
             <div
               key={node.id}
               data-node
-              onClick={(e) => { 
-                e.stopPropagation(); 
+              onClick={(e) => {
+                e.stopPropagation();
                 if (!isGreyedOut) {
                   setSelectedId(node.id);
                   // Auto-open sidebar when clicking a node
                   if (isSidebarCollapsed) {
                     toggleSidebar();
                   }
+                }
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+
+                // Select the node and open inspector
+                if (!isGreyedOut) {
+                  setSelectedId(node.id);
+                  if (isSidebarCollapsed) {
+                    toggleSidebar();
+                  }
+                }
+
+                // Only allow breakpoints on nodes that are part of the trace
+                if (activeTraceIds.has(node.id) || traceSteps.some(step => step.nodeId === node.id)) {
+                  toggleBreakpoint(node.id);
                 }
               }}
               className="absolute transition-all duration-200"
@@ -187,24 +307,42 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 width: NODE_W,
                 minHeight: NODE_H,
                 background: "#111114",
-                border: isHead 
-                  ? `2px solid ${colors.border}` 
-                  : isSelected 
-                    ? "2px solid #378ADD" 
-                    : isTraceActive
-                      ? `2px solid ${colors.border}66`
-                      : "1px solid #2a2a2e",
+                border: isPausedHere
+                  ? "3px solid #f59e0b"
+                  : isBreakpoint
+                    ? "2px solid #f59e0b"
+                    : isHead
+                      ? `2px solid ${colors.border}`
+                      : isSelected
+                        ? "2px solid #378ADD"
+                        : isTraceActive
+                          ? `2px solid ${colors.border}66`
+                          : "1px solid #2a2a2e",
                 borderRadius: 10,
                 opacity: isGreyedOut ? 0.25 : 1,
                 cursor: isGreyedOut ? "not-allowed" : "pointer",
                 overflow: "visible",
+                boxShadow: isPausedHere ? "0 0 20px rgba(245, 158, 11, 0.6)" : "none",
               }}
             >
+              {/* Breakpoint indicator - top right corner */}
+              {isBreakpoint && (
+                <div
+                  className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-[#f59e0b] flex items-center justify-center z-10 border-2 border-[#0d0d0f]"
+                  style={{
+                    boxShadow: "0 2px 8px rgba(245, 158, 11, 0.5)"
+                  }}
+                  title="Breakpoint"
+                >
+                  <div className="w-2 h-2 rounded-full bg-white" />
+                </div>
+              )}
+
               {/* Step number badges - positioned at top left, multiple if node appears multiple times */}
               {stepNumbers.length > 0 && (
                 <div className="absolute -top-2 -left-2 flex gap-1 z-10">
                   {stepNumbers.map((num, idx) => (
-                    <div 
+                    <div
                       key={idx}
                       className="w-6 h-6 rounded-full bg-[#378ADD] flex items-center justify-center text-[10px] font-bold text-white border-2 border-[#0d0d0f]"
                       style={{
@@ -218,16 +356,16 @@ export default function GraphCanvas(props: GraphCanvasProps) {
               )}
 
               {/* Top colored strip */}
-              <div 
+              <div
                 className="h-1 w-full"
-                style={{ background: colors.border }}
+                style={{ background: isPausedHere ? "#f59e0b" : isBreakpoint ? "#f59e0b" : colors.border }}
               />
 
               {/* Content */}
               <div className="p-3 overflow-hidden">
                 {/* Badges row */}
                 <div className="flex items-center gap-1.5 mb-2.5">
-                  <div 
+                  <div
                     className="text-[8px] px-2 py-1 rounded-md font-bold tracking-wider"
                     style={{ background: colors.badgeBg, color: colors.badgeText }}
                   >
@@ -238,10 +376,17 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                       MUT
                     </div>
                   )}
-                  {isHead && (
+                  {isPausedHere && (
+                    <div className="ml-auto flex items-center justify-center w-5 h-5 rounded bg-[#f59e0b]">
+                      <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                      </svg>
+                    </div>
+                  )}
+                  {isHead && !isPausedHere && (
                     <div className="ml-auto w-2 h-2 rounded-full bg-[#378ADD] animate-pulse" />
                   )}
-                  {isSelected && !isHead && (
+                  {isSelected && !isHead && !isPausedHere && (
                     <div className="ml-auto w-1.5 h-1.5 rounded-full bg-[#378ADD]" />
                   )}
                 </div>
@@ -264,46 +409,111 @@ export default function GraphCanvas(props: GraphCanvasProps) {
       </div>
 
       {/* Toolbar */}
-      <div className="absolute top-3 left-3 right-3 flex justify-between z-10 pointer-events-none">
-        <div className="flex gap-2 pointer-events-auto">
-          {isSidebarCollapsed && (
-            <button 
+      <div className="absolute top-3 left-3 z-10 pointer-events-none">
+        <div className="flex flex-col gap-2 pointer-events-auto">
+          {/* First row: Sidebar toggle + view controls + export */}
+          <div className="flex gap-2">
+            {isSidebarCollapsed && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleSidebar();
+                }}
+                className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-bold tracking-widest hover:border-[#378ADD] hover:text-white transition-colors"
+              >
+                &gt;&gt;
+              </button>
+            )}
+            {[
+              { label: "fit view", action: fitView },
+              { label: "+ zoom", action: () => setScale((s) => Math.min(MAX_SCALE, s + SCALE_STEP)) },
+              { label: "– zoom", action: () => setScale((s) => Math.max(MIN_SCALE, s - SCALE_STEP)) },
+            ].map((btn, i) => (
+              <button
+                key={i}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  btn.action();
+                }}
+                className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-medium hover:border-[#378ADD] hover:text-[#aaa] transition-colors"
+              >
+                {btn.label}
+              </button>
+            ))}
+            <button
               onClick={(e) => {
                 e.stopPropagation();
-                toggleSidebar();
+                exportGraph();
               }}
-              className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-bold tracking-widest hover:border-[#378ADD] hover:text-white transition-colors"
+              className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-medium hover:border-[#378ADD] hover:text-[#aaa] transition-colors flex items-center gap-1.5"
             >
-              &gt;&gt;
+              Export JSON
             </button>
+          </div>
+
+          {/* Second row: Info banner */}
+          <div className="bg-[#111114]/90 backdrop-blur-sm border border-[#f59e0b] rounded-lg px-4 py-2 flex items-center gap-2 shadow-lg w-fit">
+            <svg className="w-4 h-4 text-[#f59e0b] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="text-[10px] text-[#888] font-medium whitespace-nowrap">
+              {traceSteps.length > 0
+                ? "Right-click on traced nodes to add breakpoints"
+                : "Run a simulation first to enable breakpoints"}
+            </span>
+          </div>
+
+          {/* Third row: Breakpoint controls (only show when there are trace steps) */}
+          {traceSteps.length > 0 && (
+            <div className="flex gap-2">
+              {/* Breakpoint counter */}
+              {breakpoints.size > 0 && (
+                <div className="bg-[#111114] border border-[#f59e0b] rounded-md px-3 py-2 text-[#f59e0b] text-[10px] font-bold flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-[#f59e0b]" />
+                  {breakpoints.size} breakpoint{breakpoints.size !== 1 ? 's' : ''}
+                </div>
+              )}
+
+              {/* Resume/Skip controls */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (isPausedAtBreakpoint) {
+                    resumeSimulation();
+                  }
+                }}
+                disabled={!isPausedAtBreakpoint}
+                className="bg-[#378ADD] hover:bg-[#4a9bef] text-white px-4 py-2 rounded-md text-[10px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Resume
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (isPausedAtBreakpoint) {
+                    skipBreakpoint();
+                  }
+                }}
+                disabled={!isPausedAtBreakpoint}
+                className="bg-[#111114] border border-[#f59e0b] hover:bg-[#f59e0b] text-[#f59e0b] hover:text-white px-4 py-2 rounded-md text-[10px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Skip
+              </button>
+
+              {/* Clear breakpoints button */}
+              {breakpoints.size > 0 && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setBreakpoints(new Set());
+                  }}
+                  className="bg-[#111114] border border-[#ef4444] hover:bg-[#ef4444] text-[#ef4444] hover:text-white px-4 py-2 rounded-md text-[10px] font-medium transition-colors"
+                >
+                  Clear All
+                </button>
+              )}
+            </div>
           )}
-          {[
-            { label: "fit view", action: fitView },
-            { label: "+ zoom", action: () => setScale((s) => Math.min(MAX_SCALE, s + SCALE_STEP)) },
-            { label: "– zoom", action: () => setScale((s) => Math.max(MIN_SCALE, s - SCALE_STEP)) },
-          ].map((btn, i) => (
-            <button 
-              key={i} 
-              onClick={(e) => {
-                e.stopPropagation();
-                btn.action();
-              }}
-              className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-medium hover:border-[#378ADD] hover:text-[#aaa] transition-colors"
-            >
-              {btn.label}
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-2 pointer-events-auto">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              exportGraph();
-            }}
-            className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-medium hover:border-[#378ADD] hover:text-[#aaa] transition-colors flex items-center gap-1.5"
-          >
-            Export JSON
-          </button>
         </div>
       </div>
     </div>

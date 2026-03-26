@@ -30,8 +30,23 @@ export async function POST(request: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      let closed = false;
       const send = (event: SimulationEvent) => {
-        controller.enqueue(new TextEncoder().encode(encode(event)));
+        if (closed) return;
+        try {
+          controller.enqueue(new TextEncoder().encode(encode(event)));
+        } catch {
+          closed = true;
+        }
+      };
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
       };
 
       try {
@@ -83,7 +98,7 @@ export async function POST(request: NextRequest) {
                   diff_summary: 'No changes (breakpoint)',
                 },
               });
-              controller.close();
+              close();
               return;
             }
 
@@ -150,7 +165,7 @@ export async function POST(request: NextRequest) {
                   diff_summary: 'No changes (breakpoint)',
                 },
               });
-              controller.close();
+              close();
               return;
             }
 
@@ -165,7 +180,7 @@ export async function POST(request: NextRequest) {
         const message = err instanceof Error ? err.message : 'Simulation error';
         send({ type: 'error', message });
       } finally {
-        controller.close();
+        close();
       }
     },
   });

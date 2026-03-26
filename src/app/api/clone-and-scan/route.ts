@@ -79,8 +79,19 @@ export async function POST(request: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      let closed = false;
       const send = (progress: ScanProgress) => {
-        controller.enqueue(new TextEncoder().encode(encode(progress)));
+        if (closed) return;
+        try {
+          controller.enqueue(new TextEncoder().encode(encode(progress)));
+        } catch {
+          closed = true;
+        }
+      };
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        try { controller.close(); } catch { /* already closed */ }
       };
 
       let clonePath = '';
@@ -107,7 +118,7 @@ export async function POST(request: NextRequest) {
               },
               cached: true,
             });
-            controller.close();
+            close();
             return;
           }
         }
@@ -138,7 +149,7 @@ export async function POST(request: NextRequest) {
             phase: 'error',
             message: 'No Rust services found. Make sure the repo contains Cargo.toml files.',
           });
-          controller.close();
+          close();
           return;
         }
 
@@ -242,7 +253,7 @@ export async function POST(request: NextRequest) {
           await fs.rm(clonePath, { recursive: true, force: true }).catch(() => {});
         }
       } finally {
-        controller.close();
+        close();
       }
     },
   });

@@ -12,7 +12,7 @@ interface LLMConfig {
 const PROVIDER_CONFIGS: Record<LLMProvider, { model: string }> = {
   claude: { model: 'claude-opus-4-6' },
   gemini: { model: 'gemini-flash-latest' },
-  openai: { model: 'gpt-5.4-2026-03-05' },
+  openai: { model: 'gpt-5.4-pro-2026-03-05' },
 };
 
 // Gemini free tier: 2 req/min → enforce 31s minimum gap between calls
@@ -68,7 +68,9 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 6): Promise<T> {
       const expDelay = Math.min(5_000 * Math.pow(2, attempt), 90_000);
       const jitter = Math.floor(Math.random() * 3_000); // 0–3s jitter avoids thundering herd
       const delay = (serverWait !== null ? serverWait : expDelay) + jitter;
-      console.warn(`[llm] Rate limited (attempt ${attempt + 1}/${maxRetries + 1}). Retrying in ${Math.round(delay / 1000)}s...`);
+      console.warn(
+        `[llm] Rate limited (attempt ${attempt + 1}/${maxRetries + 1}). Retrying in ${Math.round(delay / 1000)}s...`,
+      );
       await new Promise((r) => setTimeout(r, delay));
     }
   }

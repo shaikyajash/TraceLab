@@ -57,14 +57,14 @@ export interface ComponentNode {
     | 'route_handler'
     | 'transformer'
     | 'validator'
-    | 'middleware'
+    | 'middls'
     | 'business_logic'
     | 'db_call'
     | 'external_http_call'
     | 'struct'
     | 'enum'
     | 'message_queue'
-    | 'function'
+    | 'function';
 
   name: string;
   input?: string;

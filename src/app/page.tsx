@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import type { ComponentsGraph, ComponentNode, PayloadEdge, ScanProgress, StepCondition, TraceStep, SimulationEvent } from "@/types";
+import type { ComponentsGraph, ComponentNode, PayloadEdge, ScanProgress, StepCondition, TraceStep } from "@/types";
 import {
   CORE_KINDS,
   NODE_W,
@@ -192,6 +192,7 @@ export default function Home() {
   const [graph, setGraph] = useState<ComponentsGraph | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [githubUrl, setGithubUrl] = useState("");
+  const [branch, setBranch] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState("");
   const [scanPhase, setScanPhase] = useState<string>("");
@@ -233,6 +234,9 @@ export default function Home() {
   const [isTracing, setIsTracing] = useState(false);
   const [traceSteps, setTraceSteps] = useState<TraceStep[]>([]);
   const [traceVisible, setTraceVisible] = useState(0);
+  const [breakpoints, setBreakpoints] = useState<Set<string>>(new Set());
+  const [isPausedAtBreakpoint, setIsPausedAtBreakpoint] = useState(false);
+  const [currentBreakpointId, setCurrentBreakpointId] = useState<string | null>(null);
 
   /* request builder */
   const [pathParams, setPathParams] = useState<Record<string, string>>({});
@@ -361,10 +365,56 @@ export default function Home() {
     };
   }, [isResizing]);
 
+  /* parse git clone command or URL */
+  const parseGitInput = useCallback((input: string): { url: string; branch?: string } => {
+    const trimmed = input.trim();
+
+    // Check if it's a git clone command
+    if (trimmed.startsWith('git clone')) {
+      const branchMatch = trimmed.match(/-b\s+([^\s]+)/);
+      const extractedBranch = branchMatch ? branchMatch[1] : undefined;
+      const urlMatch = trimmed.match(/(?:https?:\/\/|git@)[^\s]+/);
+      const extractedUrl = urlMatch ? urlMatch[0] : trimmed;
+      return { url: extractedUrl, branch: extractedBranch };
+    }
+
+    // Check if it's a web URL with /src/branch/ pattern (Gitea/GitLab style)
+    const webBranchMatch = trimmed.match(/^(https?:\/\/[^/]+\/[^/]+\/[^/]+)\/src\/branch\/(.+?)\/?$/);
+    if (webBranchMatch) {
+      const baseUrl = webBranchMatch[1];
+      const branchName = webBranchMatch[2];
+      return {
+        url: baseUrl.endsWith('.git') ? baseUrl : `${baseUrl}.git`,
+        branch: branchName
+      };
+    }
+
+    // Check for GitHub-style branch URLs
+    const githubBranchMatch = trimmed.match(/^(https?:\/\/github\.com\/[^/]+\/[^/]+)\/tree\/(.+?)\/?$/);
+    if (githubBranchMatch) {
+      const baseUrl = githubBranchMatch[1];
+      const branchName = githubBranchMatch[2];
+      return {
+        url: baseUrl.endsWith('.git') ? baseUrl : `${baseUrl}.git`,
+        branch: branchName
+      };
+    }
+
+    // Otherwise treat as plain repo URL
+    return { url: trimmed, branch: branch.trim() || undefined };
+  }, [branch]);
+
   /* scan from GitHub URL */
   const handleScan = useCallback(async () => {
-    const url = githubUrl.trim();
-    if (!url) return;
+    const input = githubUrl.trim();
+    if (!input) return;
+
+    const { url, branch: parsedBranch } = parseGitInput(input);
+
+    if (parsedBranch) {
+      setBranch(parsedBranch);
+    }
+
     setIsScanning(true);
     setError(null);
     setScanMessage("Starting...");
@@ -374,7 +424,7 @@ export default function Home() {
       const res = await fetch("/api/clone-and-scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, forceRescan }),
+        body: JSON.stringify({ url, branch: parsedBranch, forceRescan }),
       });
 
       if (!res.ok || !res.body) {
@@ -436,7 +486,7 @@ export default function Home() {
       setScanPhase("");
       setScanMessage("");
     }
-  }, [githubUrl, forceRescan]);
+  }, [githubUrl, forceRescan, parseGitInput]);
 
   /* upload JSON directly */
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -527,6 +577,8 @@ export default function Home() {
     setTraceVisible(0);
     setActiveTraceIds(new Set());
     setTraceHeadId(null);
+    setIsPausedAtBreakpoint(false);
+    setCurrentBreakpointId(null);
 
     let payload: Record<string, unknown> = {};
     try {
@@ -600,71 +652,72 @@ export default function Home() {
       setTraceHeadId(steps[i].nodeId);
       setActiveTraceIds((prev) => new Set([...prev, steps[i].nodeId]));
       setTraceVisible(i + 1);
+
+      // Check if current node is a breakpoint
+      if (breakpoints.has(steps[i].nodeId)) {
+        setIsPausedAtBreakpoint(true);
+        setCurrentBreakpointId(steps[i].nodeId);
+        setSelectedId(steps[i].nodeId);
+        setIsTracing(false);
+        return; // Pause execution
+      }
     }
 
     setIsTracing(false);
     setTimeout(() => setTraceHeadId(null), TRACE_HEAD_CLEAR_DELAY);
+  }, [traceRouteId, graph, coreEdges, coreNodeIds, nodeMap, reqBody, breakpoints]);
 
-    // Background: call /api/simulate to populate example input/output per step
-    ;(async () => {
-      try {
-        const res = await fetch("/api/simulate", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            graph,
-            start_node_id: traceRouteId,
-            initial_payload: payload,
-            breakpoints: [],
-          }),
-        });
-        if (!res.ok || !res.body) return;
+  const resumeSimulation = useCallback(async () => {
+    if (!traceSteps.length || traceVisible >= traceSteps.length) return;
 
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let simIdx = 0;
+    setIsTracing(true);
+    setIsPausedAtBreakpoint(false);
+    setCurrentBreakpointId(null);
 
-        outer: while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-              const event = JSON.parse(line) as SimulationEvent;
-              if (event.type === "step" && event.step) {
-                const s = event.step;
-                if (s.node_id === "__trace_selected__") continue;
-                const idx = simIdx++;
-                setTraceSteps((prev) => {
-                  if (idx >= prev.length) return prev;
-                  const updated = [...prev];
-                  updated[idx] = {
-                    ...updated[idx],
-                    inputPayload: s.input_payload,
-                    outputPayload: s.output_payload,
-                    diffSummary: s.diff_summary,
-                  };
-                  return updated;
-                });
-              } else if (event.type === "complete" || event.type === "error") {
-                break outer;
-              }
-            } catch { /* skip malformed line */ }
-          }
-        }
-      } catch { /* silent — payloads are optional */ }
-    })();
-  }, [traceRouteId, graph, coreEdges, coreNodeIds, nodeMap, reqBody]);
+    for (let i = traceVisible; i < traceSteps.length; i++) {
+      await new Promise((r) => setTimeout(r, TRACE_STEP_DELAY));
+      setTraceHeadId(traceSteps[i].nodeId);
+      setActiveTraceIds((prev) => new Set([...prev, traceSteps[i].nodeId]));
+      setTraceVisible(i + 1);
+
+      if (breakpoints.has(traceSteps[i].nodeId)) {
+        setIsPausedAtBreakpoint(true);
+        setCurrentBreakpointId(traceSteps[i].nodeId);
+        setSelectedId(traceSteps[i].nodeId);
+        setIsTracing(false);
+        return;
+      }
+    }
+
+    setIsTracing(false);
+    setTimeout(() => setTraceHeadId(null), TRACE_HEAD_CLEAR_DELAY);
+  }, [traceSteps, traceVisible, breakpoints]);
+
+  const skipBreakpoint = useCallback(() => {
+    setIsPausedAtBreakpoint(false);
+    setCurrentBreakpointId(null);
+    resumeSimulation();
+  }, [resumeSimulation]);
+
+  const toggleBreakpoint = useCallback((nodeId: string) => {
+    setBreakpoints((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      return next;
+    });
+  }, []);
 
   const clearTrace = useCallback(() => {
     setActiveTraceIds(new Set());
     setTraceHeadId(null);
     setTraceSteps([]);
     setTraceVisible(0);
+    setIsPausedAtBreakpoint(false);
+    setCurrentBreakpointId(null);
   }, []);
 
   /* landing screen */
@@ -673,6 +726,8 @@ export default function Home() {
       <LandingPage
         githubUrl={githubUrl}
         setGithubUrl={setGithubUrl}
+        branch={branch}
+        setBranch={setBranch}
         forceRescan={forceRescan}
         setForceRescan={setForceRescan}
         isScanning={isScanning}
@@ -761,6 +816,7 @@ export default function Home() {
               setError={setError}
               setIsGraphUnloading={setIsGraphUnloading}
               toggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+              isPausedAtBreakpoint={isPausedAtBreakpoint}
             />
           )}
         </div>
@@ -790,6 +846,13 @@ export default function Home() {
           traceSteps={traceSteps}
           traceVisible={traceVisible}
           isSidebarCollapsed={isSidebarCollapsed}
+          breakpoints={breakpoints}
+          toggleBreakpoint={toggleBreakpoint}
+          setBreakpoints={setBreakpoints}
+          isPausedAtBreakpoint={isPausedAtBreakpoint}
+          currentBreakpointId={currentBreakpointId}
+          resumeSimulation={resumeSimulation}
+          skipBreakpoint={skipBreakpoint}
           toggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
           setSelectedId={(id) => {
             setSelectedId(id);
