@@ -409,7 +409,14 @@ ${fileList}${externalTypesSection}`;
 
 export function buildTracesOnlyPrompt(
   serviceName: string,
-  nodes: Array<{ id: string; kind: string; name: string; description: string; source_code?: string | null; example_payload?: string | null }>,
+  nodes: Array<{
+    id: string;
+    kind: string;
+    name: string;
+    description: string;
+    source_code?: string | null;
+    example_payload?: string | null;
+  }>,
   edges: Array<{ from: string; to: string; payload: string }>,
 ): { system: string; user: string } {
   const system = `You are a Rust code analyzer generating execution traces for a visual flow simulator.
@@ -430,14 +437,50 @@ STEP 1 — Build the full call tree for EVERY route_handler node:
   Start at the route_handler. Follow every edge outward recursively.
   Every reachable node IS a step. Do not stop at business_logic — keep following edges to db_calls, validators, etc.
 
+  Self-check before finalizing each trace: for every step, look at its outgoing edges in the EDGES list.
+  If any edge target is NOT already a later step, you stopped too early — add it.
+  A trace is complete only when every step's outgoing edges are accounted for as later steps or conditional branches.
+
 STEP 2 — Write one trace per distinct execution path.
-  Distinct = different nodes visited. Look for branches in route handler source_code.
+  Distinct = different nodes visited due to a branch:
+    - match arms dispatching to different functions
+    - if/else calling different components
+    - Option/Result that short-circuits on None/Err
+    - Path parameter dispatch (/{action} → different handler per value)
+    - Auth role dispatch
+  Look at the source_code of EVERY node to identify all branch points — not just the route handler.
   Ordering: most-specific (has match conditions) FIRST, catch-all (match: []) LAST.
 
 STEPS — THE #1 RULE:
   step 1: the route_handler itself
-  step 2+: every node it calls, then every node those call, until leaf nodes
+  step 2+: every node it calls, then every node those call, until leaf nodes (no outgoing edges)
   Cross-check: for each step's node_id, find its outgoing edges — those targets must also be steps.
+
+STEP 3 — Condition format (used in both "match" and "when"):
+  {"field": "action",    "op": "eq",        "value": "create"}
+  {"field": "role",      "op": "in",        "value": ["admin", "editor"]}
+  {"field": "role",      "op": "not_in",    "value": ["admin"]}
+  {"field": "token",     "op": "exists"}
+  {"field": "token",     "op": "not_exists"}
+  {"field": "src_chain", "op": "eq_field",  "value": "dst_chain"}
+  {"field": "src_chain", "op": "neq_field", "value": "dst_chain"}
+  Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field
+
+STEP 4 — Parametric traces: avoid combinatorial explosion.
+  Do NOT write one trace per enum variant combination.
+  Write ONE trace and use per-step "when" conditions:
+    step_a runs when format=="json"
+    step_b runs when format=="xml"
+  At runtime, only matching steps execute.
+
+STEP 5 — Required catch-all traces (LAST for each route):
+  - "Deserialization failure" trace (match: []) for unknown enum values → 400
+  - "Unauthorized / mismatch" trace (match: []) for wildcard _ arms → 401/403
+
+STEP 6 — Path parameter dispatch:
+  /{action} routes → trace per known action value using:
+    {"field": "action", "op": "in", "value": ["initiate", "redeem", "refund"]}
+  Add catch-all for unknown path param values.
 
 Trace fields:
   route_id         route_handler node id
@@ -448,9 +491,9 @@ Trace fields:
   steps            complete ordered list (see above)
 
 Step fields:
-  node_id     id from the nodes list
+  node_id     id from the nodes list (must exist)
   edge_label  data flowing in ("" for step 1)
-  summary     what happens here and why
+  summary     what happens here and why, including condition evaluation result
   when        (optional) skip this step if condition fails
 
 Condition format: {"field": "x", "op": "eq", "value": "y"}
@@ -459,20 +502,22 @@ Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field`}`;
   const routeHandlers = nodes.filter((n) => n.kind === 'route_handler');
   const otherNodes = nodes.filter((n) => n.kind !== 'route_handler');
 
-  const nodesSummary = [
-    ...routeHandlers.map((n) =>
-      `[${n.kind}] id="${n.id}" name="${n.name}"\n  desc: ${n.description}${n.source_code ? `\n  source:\n${n.source_code}` : ''}${n.example_payload ? `\n  example_payload: ${n.example_payload}` : ''}`,
-    ),
-    ...otherNodes.map((n) =>
-      `[${n.kind}] id="${n.id}" name="${n.name}"\n  desc: ${n.description}`,
-    ),
-  ].join('\n\n');
+  const formatNode = (n: (typeof nodes)[0]) =>
+    `[${n.kind}] id="${n.id}" name="${n.name}"\n  desc: ${n.description}${n.source_code ? `\n  source:\n${n.source_code}` : ''}${n.example_payload ? `\n  example_payload: ${n.example_payload}` : ''}`;
 
-  const edgesSummary = edges
-    .map((e) => `  ${e.from} → ${e.to}  (${e.payload})`)
-    .join('\n');
+  const nodesSummary = [...routeHandlers.map(formatNode), ...otherNodes.map(formatNode)].join(
+    '\n\n',
+  );
+
+  const edgesSummary = edges.map((e) => `  ${e.from} → ${e.to}  (${e.payload})`).join('\n');
 
   const user = `Generate all execution traces for service "${serviceName}".
+
+BEFORE writing any output, do this analysis mentally:
+  1. For each route_handler, follow its outgoing edges recursively to build the full reachable node set.
+  2. Identify every branch point in every node's source_code (match arms, if/else, Option/Result paths).
+  3. For each distinct execution path, list the exact sequence of node_ids from entry to leaf.
+  4. Self-check: for every step in each trace, look at its outgoing edges in EDGES. If any target is NOT a later step, you stopped too early — add it.
 
 NODES:
 ${nodesSummary}
@@ -480,7 +525,7 @@ ${nodesSummary}
 EDGES (call graph):
 ${edgesSummary}
 
-Using the edges above, trace every route_handler through its full call chain. Return the JSON object with a "traces" array.`;
+Using the source_code and edges above, trace every route_handler through its full call chain. Return the JSON object with a "traces" array.`;
 
   return { system, user };
 }
