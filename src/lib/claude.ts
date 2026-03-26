@@ -1,5 +1,5 @@
 import { DiscoveredService, PerServiceResult, CrossServiceCall } from './schema';
-import { buildPerServicePrompt, buildCrossServicePrompt, SOURCE_CHAR_LIMITS, type ChunkInfo } from './prompts';
+import { buildPerServicePrompt, buildCrossServicePrompt, buildTracesOnlyPrompt, SOURCE_CHAR_LIMITS, type ChunkInfo } from './prompts';
 import { chat, getModelName as _getModelName, getConfig } from './llm';
 import { resolveExternalTypes, type ResolvedExternalType } from './external-types';
 import { validatePerServiceResult } from './validator';
@@ -203,7 +203,28 @@ export async function analyzeService(
   }
 
   // Step 4: Merge if chunked, otherwise return directly
-  return chunks.length > 1 ? mergePartialResults(partialResults) : partialResults[0];
+  if (chunks.length === 1) return partialResults[0];
+
+  const merged = mergePartialResults(partialResults);
+
+  // Step 5: Generate traces in a separate pass now that the full call graph is available
+  options?.onProgress?.(`Generating traces for ${service.name} from merged call graph...`);
+  try {
+    const { system, user } = buildTracesOnlyPrompt(
+      service.name,
+      merged.nodes.map((n) => ({ ...n, description: n.description ?? '' })),
+      merged.edges,
+    );
+    const jsonStr = await chat({ system, user });
+    const parsed = JSON.parse(jsonStr);
+    if (Array.isArray(parsed.traces)) {
+      merged.traces = parsed.traces;
+    }
+  } catch {
+    // Non-fatal — merged result still has nodes/edges, traces just stay empty
+  }
+
+  return merged;
 }
 
 // ─── Cross-service analysis ──────────────────────────────────────────

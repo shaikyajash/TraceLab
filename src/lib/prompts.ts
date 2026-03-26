@@ -12,7 +12,7 @@ export const SOURCE_CHAR_LIMITS: Record<string, number> = {
 };
 
 export interface ChunkInfo {
-  index: number;   // 1-based
+  index: number; // 1-based
   total: number;
   allFileNames: string[];
 }
@@ -58,6 +58,7 @@ You MUST extract nodes for every layer:
   e) Every database function (sqlx, diesel, sea-orm, etc.)
   f) Every outbound HTTP call (reqwest, hyper client, ureq)
   g) Every enum involved in serde deserialization of request/response bodies
+  h) Every adapter/wrapper struct that delegates to an external crate (see Rule 6)
 
 If a handler calls handle_foo(), handle_foo is a node. If handle_foo calls validate_bar(), validate_bar is a node. Follow the full call chain.
 
@@ -97,6 +98,8 @@ Constraints:
   2. DAG only — no cycles. A→B→C→A is forbidden.
   3. Include conditional edges (if A calls B only in one match arm, include A→B).
   4. Execution order lives in trace steps, not edges.
+  5. A route_handler CAN call another route_handler (internal service calls, delegation patterns).
+     When this happens, continue tracing through the called route's full downstream call chain too.
 
 ══════════════════════════════════════════════
 RULE 4 — SERDE AWARENESS
@@ -116,26 +119,71 @@ Rules:
   - Never guess variants. Use only what appears in source or EXTERNAL TYPE DEFINITIONS.
 
 ══════════════════════════════════════════════
-RULE 5 — TRACES (invest the most effort here)
+RULE 6 — EXTERNAL CRATE ADAPTERS
 ══════════════════════════════════════════════
 
-Traces are pre-computed execution paths that drive a visual flow simulator. Quality matters.
+An "adapter" is a struct defined in this service that wraps a type from an external crate and
+delegates method calls to it. These are NOT internal business logic — they are the boundary to
+an external system.
 
-STEP 1 — Find all distinct execution paths per route handler.
-  Two paths are distinct if they visit DIFFERENT components. At every branch point ask:
-  "Does this branch cause different components to be called?"
-  Branch patterns to find:
-    - match arms dispatching to different handler functions
+How to identify them:
+  - The struct holds a field of a type from an external crate (use some_crate::...)
+  - Its impl block only delegates: self.inner.method(...).await or self.client.post(...)
+  - It implements a local trait (Port/Provider pattern) that hides the external dependency
+
+How to classify them:
+  - kind: "external_http_call" if the external crate makes network calls (orderbook providers,
+    HTTP clients, chain RPC clients, price feeds, oracle services, messaging SDKs)
+  - kind: "db_call" if the external crate talks to a database
+  - kind: "function" only if it is a pure in-process computation with no I/O
+
+What to put in the node:
+  - id: the adapter method being called, e.g. "PendingOrdersAdapter::get_pending_orders"
+  - name: short label, e.g. "PendingOrdersAdapter"
+  - description: "Delegates to <ExternalType> from crate <crate_name>. Returns <ReturnType>. This is the boundary to an external service — execution continues outside this codebase."
+  - input/output: use the actual Rust types from the signature
+  - The call chain ENDS here — do not fabricate further internal steps
+
+Edges:
+  - Add an edge from the internal function that calls the adapter → the adapter node
+  - The adapter node has no outgoing edges (it is a leaf — execution leaves the codebase)
+
+External packages:
+  - Add an entry to external_packages for the external crate with its purpose
+
+══════════════════════════════════════════════
+RULE 5 — TRACES (most critical section)
+══════════════════════════════════════════════
+
+Traces are the ONLY thing that drives the visual flow simulator. Without complete traces, the simulator shows nothing.
+
+STEP 1 — For EVERY route_handler, trace execution from entry all the way to the final response.
+
+  Think like a debugger stepping through the code:
+    route_handler receives request
+      → calls middleware / auth check
+        → calls business_logic fn
+          → calls validator
+          → calls db_call  ← keep going
+          → calls external_adapter  ← keep going
+            → external service responds
+          → returns result
+        → business_logic returns
+      → route_handler sends HTTP response  ← this is the end
+
+  Every function visited in that walk = one step. Do NOT stop at any intermediate node.
+  If a route internally calls another route, continue tracing through THAT route's
+  full downstream chain too — all the way to its leaf nodes.
+
+  Two paths are distinct if they visit DIFFERENT nodes:
+    - match arms dispatching to different functions
     - if/else calling different components
-    - boolean flags that gate component calls (needs_pk, is_admin, has_cache, etc.)
-    - Option/Result checks that short-circuit when None/Err
-    - Path parameter dispatch (/{action} where "initiate" vs "redeem" → different logic)
-    - Enum field dispatch (each action/type value → different handler)
-    - Auth role dispatch (admin vs user → different flow)
+    - Option/Result that short-circuits on None/Err
+    - Path parameter dispatch (/{action} → different handler per value)
+    - Auth role dispatch (admin vs user)
     - Cached vs uncached path
 
-STEP 2 — Write traces. One per distinct path. Ordering: most-specific FIRST, catch-alls LAST.
-  The trace engine tries traces in order; first one where ALL match conditions pass wins.
+STEP 2 — Write one trace per distinct path. Most-specific FIRST, catch-alls LAST.
 
   Trace fields:
     route_id         route_handler node id
@@ -143,7 +191,16 @@ STEP 2 — Write traces. One per distinct path. Ordering: most-specific FIRST, c
     description      one line: what this path does and how it ends
     example_payload  JSON object (NOT a string) that triggers this exact path
     match            array of conditions (ALL must pass); [] = unconditional/catch-all
-    steps            ordered component visits
+    steps            complete end-to-end list — see below
+
+  STEPS — follow every edge until you hit a true leaf (no outgoing edges):
+    step 1 : the route_handler itself
+    step 2 : first node it calls
+    step 3 : what that node calls
+    ... keep going until the final db_call / external_http_call
+
+    Self-check before finalizing: for every step, look at its outgoing edges.
+    If any target is NOT already a later step, you stopped too early — add it.
 
   Step fields:
     node_id          id from the nodes array (must exist)
@@ -329,7 +386,8 @@ EXAMPLE OUTPUT SHAPE (generic — replace all placeholders with real values)
 All files in this service: ${chunkInfo.allFileNames.join(', ')}
 You are only seeing a SUBSET of files in this chunk. Extract only what is defined in these files.
 Do NOT invent nodes or edges for files you cannot see. Other chunks will cover them.
-Still output a complete, valid JSON object — just with partial nodes/edges/traces for this chunk.
+IMPORTANT: Set "traces": [] — do NOT generate traces in chunked mode. Traces will be generated separately after all chunks are merged, once the full call graph is available.
+Still output a complete, valid JSON object for all other fields.
 
 `
     : '';
@@ -345,6 +403,84 @@ BEFORE writing any output, do this analysis mentally:
 THEN produce the complete JSON object. Do not truncate. Do not stop early.
 
 ${fileList}${externalTypesSection}`;
+
+  return { system, user };
+}
+
+export function buildTracesOnlyPrompt(
+  serviceName: string,
+  nodes: Array<{ id: string; kind: string; name: string; description: string; source_code?: string | null; example_payload?: string | null }>,
+  edges: Array<{ from: string; to: string; payload: string }>,
+): { system: string; user: string } {
+  const system = `You are a Rust code analyzer generating execution traces for a visual flow simulator.
+
+OUTPUT RULE: Your ENTIRE response must be ONE raw JSON object.
+First character: "{". Last character: "}". No markdown, no prose, no comments.
+
+Output shape:
+{
+  "traces": [ ...trace objects... ]
+}
+
+${`══════════════════════════════════════════════
+TRACE RULES
+══════════════════════════════════════════════
+
+STEP 1 — Build the full call tree for EVERY route_handler node:
+  Start at the route_handler. Follow every edge outward recursively.
+  Every reachable node IS a step. Do not stop at business_logic — keep following edges to db_calls, validators, etc.
+
+STEP 2 — Write one trace per distinct execution path.
+  Distinct = different nodes visited. Look for branches in route handler source_code.
+  Ordering: most-specific (has match conditions) FIRST, catch-all (match: []) LAST.
+
+STEPS — THE #1 RULE:
+  step 1: the route_handler itself
+  step 2+: every node it calls, then every node those call, until leaf nodes
+  Cross-check: for each step's node_id, find its outgoing edges — those targets must also be steps.
+
+Trace fields:
+  route_id         route_handler node id
+  label            short name with distinguishing condition
+  description      one line: what this path does and how it ends
+  example_payload  JSON object (not string) that triggers this path
+  match            condition array; [] = catch-all
+  steps            complete ordered list (see above)
+
+Step fields:
+  node_id     id from the nodes list
+  edge_label  data flowing in ("" for step 1)
+  summary     what happens here and why
+  when        (optional) skip this step if condition fails
+
+Condition format: {"field": "x", "op": "eq", "value": "y"}
+Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field`}`;
+
+  const routeHandlers = nodes.filter((n) => n.kind === 'route_handler');
+  const otherNodes = nodes.filter((n) => n.kind !== 'route_handler');
+
+  const nodesSummary = [
+    ...routeHandlers.map((n) =>
+      `[${n.kind}] id="${n.id}" name="${n.name}"\n  desc: ${n.description}${n.source_code ? `\n  source:\n${n.source_code}` : ''}${n.example_payload ? `\n  example_payload: ${n.example_payload}` : ''}`,
+    ),
+    ...otherNodes.map((n) =>
+      `[${n.kind}] id="${n.id}" name="${n.name}"\n  desc: ${n.description}`,
+    ),
+  ].join('\n\n');
+
+  const edgesSummary = edges
+    .map((e) => `  ${e.from} → ${e.to}  (${e.payload})`)
+    .join('\n');
+
+  const user = `Generate all execution traces for service "${serviceName}".
+
+NODES:
+${nodesSummary}
+
+EDGES (call graph):
+${edgesSummary}
+
+Using the edges above, trace every route_handler through its full call chain. Return the JSON object with a "traces" array.`;
 
   return { system, user };
 }

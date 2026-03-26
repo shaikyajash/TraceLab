@@ -480,7 +480,7 @@ export default function Home() {
 
   const handleCanvasMouseUp = useCallback(() => setIsPanning(false), []);
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
+  const handleWheel = useCallback((_e: React.WheelEvent) => {
     // Disabled zoom on scroll
   }, []);
 
@@ -568,7 +568,7 @@ export default function Home() {
       }
 
       /* filter steps by "when" conditions */
-      steps = bestTrace.steps
+      const traceStepsRaw = bestTrace.steps
         .filter((s) => !s.when || evalCond(s.when, payload))
         .map((s) => {
           const node = nodeMap.get(s.node_id);
@@ -582,6 +582,13 @@ export default function Home() {
             outputType: node?.output ?? null,
           };
         });
+
+      /* if LLM trace is degenerate (only the start node repeated), fall back to graph walk */
+      const uniqueNodes = new Set(traceStepsRaw.map((s) => s.nodeId));
+      const isDegenerate = uniqueNodes.size <= 1;
+      steps = isDegenerate
+        ? smartTrace(traceRouteId, coreEdges, coreNodeIds, nodeMap, payload)
+        : traceStepsRaw;
     } else {
       steps = smartTrace(traceRouteId, coreEdges, coreNodeIds, nodeMap, payload);
     }
