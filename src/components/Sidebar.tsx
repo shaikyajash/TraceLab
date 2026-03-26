@@ -187,7 +187,7 @@ export default function Sidebar(props: SidebarProps) {
     >
       {/* Simulate Header */}
       <div className="p-4 border-b-[0.5px] border-[#2a2a2e]">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center justify-between mb-3 mt-0.5">
           <div className="text-[10px] text-[#666] tracking-[1.2px] font-semibold">SIMULATE</div>
           {toggleSidebar && (
             <button 
@@ -222,7 +222,7 @@ export default function Sidebar(props: SidebarProps) {
                 <SelectItem 
                   key={r.id} 
                   value={r.id} 
-                  className="text-[11px] text-white hover:bg-[#378ADD] hover:text-white focus:bg-[#378ADD] focus:text-white cursor-pointer data-highlighted:bg-[#378ADD] data-highlighted:text-white"
+                  className="text-[11px] text-white hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900 cursor-pointer data-highlighted:bg-gray-200 data-highlighted:text-gray-900"
                 >
                   {r.path_pattern || r.name}
                 </SelectItem>
@@ -442,7 +442,7 @@ export default function Sidebar(props: SidebarProps) {
       </div>
 
       {/* Back button */}
-      <div className="p-4 border-t border-[#2a2a2e]">
+      <div className="p-2 border-t border-[#2a2a2e]">
         <button 
           onClick={() => {
             if (setIsGraphUnloading) {
@@ -466,7 +466,7 @@ export default function Sidebar(props: SidebarProps) {
           }}
           className="w-full bg-transparent border border-[#2a2a2e] rounded-md py-2 text-[#666] text-[10px] cursor-pointer hover:border-[#378ADD] hover:text-[#888] transition-colors"
         >
-          &larr; load different file
+          &larr; Scan different file
         </button>
       </div>
     </div>
