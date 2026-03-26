@@ -3,9 +3,74 @@ import path from 'path';
 import { parse as parseTOML } from 'smol-toml';
 import { DiscoveredService } from './schema';
 
-const SKIP_DIRS = new Set(['target', 'node_modules', '.git', '.idea', '.vscode']);
+const SKIP_DIRS = new Set([
+  'target',
+  'node_modules',
+  '.git',
+  '.idea',
+  '.vscode',
+  'tests',
+  'benches',
+  'examples',
+]);
 const MAX_FILE_SIZE = 100 * 1024; // 100KB per file
 const MAX_TOTAL_CHARS = 400_000; // ~100k tokens total per service
+
+/**
+ * Strip #[cfg(test)] mod blocks from Rust source.
+ * These can be 60-80% of a well-tested file — useless for architecture analysis.
+ */
+function stripTestCode(content: string): string {
+  const lines = content.split('\n');
+  const out: string[] = [];
+  let depth = 0; // brace depth inside a test block
+  let inTest = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (!inTest) {
+      // Detect   #[cfg(test)]   optionally followed by   mod tests {
+      if (/^\s*#\s*\[cfg\s*\(\s*test\s*\)\s*\]/.test(line)) {
+        // Peek ahead: if the very next non-blank line starts a mod block, skip both
+        let j = i + 1;
+        while (j < lines.length && lines[j].trim() === '') j++;
+        if (j < lines.length && /^\s*(pub\s+)?mod\s+\w+\s*\{/.test(lines[j])) {
+          inTest = true;
+          depth = 0;
+          i = j - 1; // will be incremented to j by the loop
+          continue;
+        }
+      }
+      // Also catch   mod tests {   that comes right after the cfg attribute was already consumed
+      out.push(line);
+    } else {
+      // Count braces to find the end of the test module
+      for (const ch of line) {
+        if (ch === '{') depth++;
+        else if (ch === '}') depth--;
+      }
+      if (depth <= 0) {
+        inTest = false;
+        depth = 0;
+      }
+    }
+  }
+
+  return out.join('\n');
+}
+
+/** Returns true for files that are only useful for testing, not architecture analysis */
+function isTestOnlyFile(relativePath: string): boolean {
+  const base = relativePath.split('/').pop() ?? '';
+  return (
+    base === 'test_utils.rs' ||
+    base.startsWith('test_') ||
+    base.endsWith('_test.rs') ||
+    base.endsWith('_tests.rs') ||
+    relativePath.includes('/test_utils/')
+  );
+}
 
 export async function validateWorkspacePath(workspacePath: string): Promise<void> {
   const stat = await fs.stat(workspacePath);
@@ -98,15 +163,22 @@ export async function readServiceSource(
 
   let totalChars = 0;
   for (const filePath of rsFiles) {
+    const relativePath = path.relative(workspacePath, filePath);
+
+    // Skip test-only files — they add noise without architecture value
+    if (isTestOnlyFile(relativePath)) continue;
+
     const stat = await fs.stat(filePath);
     if (stat.size > MAX_FILE_SIZE) continue;
-    const content = await fs.readFile(filePath, 'utf-8');
+
+    let content = await fs.readFile(filePath, 'utf-8');
+
+    // Strip #[cfg(test)] mod blocks — can be 60-80% of a well-tested Rust file
+    content = stripTestCode(content);
+
     if (totalChars + content.length > MAX_TOTAL_CHARS) break;
     totalChars += content.length;
-    fileContents.push({
-      relativePath: path.relative(workspacePath, filePath),
-      content,
-    });
+    fileContents.push({ relativePath, content });
   }
 
   return { ...service, rsFiles: fileContents };

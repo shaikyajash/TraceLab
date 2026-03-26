@@ -18,6 +18,7 @@ export const CORE_KINDS = new Set([
   "db_call",
   "external_http_call",
   "function",
+  "background_process",
 ]);
 
 // Node kind colors
@@ -70,6 +71,12 @@ export const KIND_COLORS: Record<string, NodeColors> = {
     badgeBg: "#CBD5E0",
     badgeText: "#2D3748",
   },
+  background_process: {
+    bg: "#1a0d14",
+    border: "#9B3060",
+    badgeBg: "#F0A0C0",
+    badgeText: "#72164A",
+  },
 };
 
 // Node kind labels
@@ -82,4 +89,5 @@ export const KIND_LABELS: Record<string, string> = {
   db_call: "DB",
   external_http_call: "EXT HTTP",
   function: "FUNC",
+  background_process: "WORKER",
 };

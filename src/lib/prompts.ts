@@ -77,6 +77,12 @@ RULE 2 — NODE KINDS (use exact values)
   enum               Enum (especially serde-deserialized ones)
   message_queue      Async messaging
   function           Utility that doesn't fit above
+  background_process Long-running loop or spawned task NOT tied to an HTTP route
+                     (e.g. tokio::spawn loops, screening services, engine runners,
+                      cron-style workers, status watchers). Use this instead of
+                      business_logic when the component runs independently of any
+                      incoming request. These nodes appear in the graph but do NOT
+                      need a trace (they are never the entry point of an HTTP request).
 
 Id rules:
   - route_handler → "GET /health", "POST /api/items/{id}"
@@ -119,7 +125,7 @@ Rules:
   - Never guess variants. Use only what appears in source or EXTERNAL TYPE DEFINITIONS.
 
 ══════════════════════════════════════════════
-RULE 6 — EXTERNAL CRATE ADAPTERS
+RULE 5 — EXTERNAL CRATE ADAPTERS
 ══════════════════════════════════════════════
 
 An "adapter" is a struct defined in this service that wraps a type from an external crate and
@@ -158,7 +164,7 @@ External packages:
   - Add an entry to external_packages for the external crate with its purpose
 
 ══════════════════════════════════════════════
-RULE 7 — RUST TRAIT DISPATCH (follow concrete implementations)
+RULE 6 — RUST TRAIT DISPATCH (follow concrete implementations)
 ══════════════════════════════════════════════
 
 Rust code often calls methods on trait objects (Box<dyn Trait>, Arc<dyn Trait>, impl Trait).
@@ -189,7 +195,48 @@ Example of correct tracing:
   WRONG:   create node for ExecutorProvider::get_chains (trait method — not a real callable node)
 
 ══════════════════════════════════════════════
-RULE 5 — TRACES (most critical section)
+RULE 7 — NODE OUTPUT CASES (output_cases)
+══════════════════════════════════════════════
+
+output_cases let a node return different output values depending on the input payload —
+same condition system as trace match. This powers per-step input editing in the simulator:
+when the user changes a step's input, the output updates deterministically.
+
+WHEN TO ADD output_cases:
+  - route_handler:    always — it can return success OR error responses
+  - business_logic:   when its return value changes shape based on input (e.g. Ok(data) vs Err)
+  - external_http_call / db_call: when it can return data OR an error object
+  - validator:        when it returns Ok(()) vs Err("reason") depending on input
+  - transformer:      only if the output shape genuinely differs between input formats
+  - struct / enum / background_process: SKIP — they have no dynamic output
+
+FORMAT:
+  "output_cases": [
+    {
+      "match": [{"field": "chains[0].solver_id", "op": "exists"}],
+      "output": {"ok": true, "result": "registered"},
+      "explanation": "Current format succeeded"
+    },
+    {
+      "match": [],
+      "output": {"ok": false, "error": "Invalid request format"},
+      "explanation": "Catch-all — deserialization failed or unknown format"
+    }
+  ]
+
+Rules:
+  - Same condition ops as trace match: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field, eq_type
+  - First case whose match passes wins. match: [] = unconditional catch-all. Put it LAST.
+  - If a node always returns the same value regardless of input, use example_output instead (no output_cases).
+  - output value must be a JSON object, array, string, number, boolean, or null — never a string-escaped JSON.
+  - Keep output values realistic: use the node's actual return type fields, not placeholder strings.
+
+IMPORTANT: output_cases are evaluated against the INPUT payload flowing INTO that node
+  (which may be the previous step's output in a simulation chain, not the original request body).
+  Write conditions that match the data actually arriving at that node, not the top-level request shape.
+
+══════════════════════════════════════════════
+RULE 8 — TRACES (most critical section)
 ══════════════════════════════════════════════
 
 Traces are the ONLY thing that drives the visual flow simulator. Without complete traces, the simulator shows nothing.
@@ -253,7 +300,29 @@ STEP 3 — Condition format (used in both "match" and "when"):
     {"field": "token",     "op": "not_exists"}
     {"field": "src_chain", "op": "eq_field",  "value": "dst_chain"}
     {"field": "src_chain", "op": "neq_field", "value": "dst_chain"}
-  Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field
+    {"field": "chains[0]", "op": "eq_type",   "value": "string"}
+  Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field, eq_type
+
+  FIELD ACCESS — dot notation and array indices are both supported:
+    "chains[0].solver_id"  accesses the solver_id field of the first element of chains
+    "chains[0]"            accesses the first element itself (useful with eq_type)
+    "body.user.role"       deep nested access
+
+  eq_type — USE THIS when a route accepts multiple payload formats that differ by element type,
+  not just by field presence. Value is the JavaScript typeof string: "string", "number",
+  "boolean", "object".
+
+  CRITICAL — when to use eq_type vs not_exists:
+    WRONG: use "chains[0].name not_exists" to detect legacy format.
+           This also matches {"chains": [{}]} (empty object), causing the wrong trace to run.
+    RIGHT: use "chains[0] eq_type string" to confirm the element itself is a primitive string.
+           {"chains": ["ethereum"]} → chains[0] is "string" → matches legacy trace ✓
+           {"chains": [{}]}        → chains[0] is "object" → falls through to catch-all ✓
+
+  Common pattern — multi-format route (current object format vs legacy string format):
+    Trace A (current format):  match: [{"field": "chains[0].solver_id", "op": "exists"}]
+    Trace B (legacy format):   match: [{"field": "chains[0]", "op": "eq_type", "value": "string"}]
+    Trace C (deserialization failure): match: []  ← catches anything else, e.g. [{}]
 
 STEP 4 — Parametric traces: avoid combinatorial explosion.
   Do NOT write one trace per enum variant combination.
@@ -301,6 +370,9 @@ NODE — all fields required on every node (use null for optional fields with no
                                  Generate based on the return type and source code logic.
                                  null only if return type is () or void.
   "fields"          array|null   enum: [{name, type:"serde-value"}]  struct: [{name, type}]  else: null
+  "output_cases"    array|null   conditional outputs — see Rule 7. null if node always returns the same value.
+                                 Each entry: {"match": [...conditions], "output": <json value>, "explanation": "..."}
+                                 match: [] = unconditional catch-all (put last). First matching case wins.
 
 EDGE:
   "from"         string   caller node id
@@ -350,7 +422,11 @@ EXAMPLE OUTPUT SHAPE (generic — replace all placeholders with real values)
      "description": "<what it does>", "method": "POST", "path_pattern": "/items/{id}",
      "handler": "<module::fn>", "source_code": "<verbatim fn body>",
      "example_payload": "{\"field\":\"value\"}",
-     "example_input": {"field": "value"}, "example_output": {"result": "value"}, "fields": null},
+     "example_input": {"field": "value"}, "example_output": {"result": "value"}, "fields": null,
+     "output_cases": [
+       {"match": [{"field": "field", "op": "exists"}], "output": {"ok": true, "result": "success"}, "explanation": "Valid input"},
+       {"match": [], "output": {"ok": false, "error": "Invalid input"}, "explanation": "Catch-all failure"}
+     ]},
     {"id": "<middleware_id>", "service": "<svc>", "kind": "middleware", "name": "<Name>",
      "input": "Request", "output": "Request with <Ext> or <error>", "mutates_state": false,
      "mutation_target": null, "defined_in": "src/auth.rs", "description": "<desc>",
@@ -513,7 +589,27 @@ STEP 3 — Condition format (used in both "match" and "when"):
   {"field": "token",     "op": "not_exists"}
   {"field": "src_chain", "op": "eq_field",  "value": "dst_chain"}
   {"field": "src_chain", "op": "neq_field", "value": "dst_chain"}
-  Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field
+  {"field": "chains[0]", "op": "eq_type",   "value": "string"}
+  Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field, eq_type
+
+  FIELD ACCESS — dot notation and array indices both supported:
+    "chains[0].solver_id" → first element's solver_id field
+    "chains[0]"           → first element itself (use with eq_type)
+
+  eq_type — use when a route accepts multiple payload formats that differ by element type.
+  Value is the JavaScript typeof string: "string", "number", "boolean", "object".
+
+  CRITICAL — when to use eq_type vs not_exists:
+    WRONG: "chains[0].solver_id not_exists" to mean "legacy format"
+           — also matches {"chains": [{}]}, sending the wrong trace
+    RIGHT: "chains[0] eq_type string" confirms the element is a primitive string
+           {"chains": ["ethereum"]} → string → legacy ✓
+           {"chains": [{}]}        → object → falls to catch-all ✓
+
+  Multi-format pattern:
+    current format trace:  match: [{"field": "chains[0].solver_id", "op": "exists"}]
+    legacy format trace:   match: [{"field": "chains[0]", "op": "eq_type", "value": "string"}]
+    deserialization catch: match: []
 
 STEP 4 — Parametric traces: avoid combinatorial explosion.
   Do NOT write one trace per enum variant combination.
@@ -546,7 +642,7 @@ Step fields:
   when        (optional) skip this step if condition fails
 
 Condition format: {"field": "x", "op": "eq", "value": "y"}
-Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field`}`;
+Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field, eq_type`}`;
 
   const routeHandlers = nodes.filter((n) => n.kind === 'route_handler');
   const otherNodes = nodes.filter((n) => n.kind !== 'route_handler');

@@ -30,6 +30,7 @@ interface SidebarProps {
   setIsGraphUnloading?: (unloading: boolean) => void;
   toggleSidebar?: () => void;
   isPausedAtBreakpoint?: boolean;
+  rerunFromStep: (stepIndex: number, nodeId: string, newInput: unknown) => void;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -113,12 +114,15 @@ export default function Sidebar(props: SidebarProps) {
     setIsGraphUnloading,
     toggleSidebar,
     isPausedAtBreakpoint,
+    rerunFromStep,
   } = props;
 
   const [paramsOpen, setParamsOpen] = useState(true);
   const [bodyOpen, setBodyOpen] = useState(true);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [traceFlowOpen, setTraceFlowOpen] = useState(false);
+  const [expandedStep, setExpandedStep] = useState<number | null>(null);
+  const [stepInputEdits, setStepInputEdits] = useState<Record<number, string>>({});
 
   const traceFlowRef = useRef<HTMLDivElement>(null);
   const inspectorRef = useRef<HTMLDivElement>(null);
@@ -127,6 +131,8 @@ export default function Sidebar(props: SidebarProps) {
     runSimulation();
     setTraceFlowOpen(true);
     setInspectorOpen(false);
+    setExpandedStep(null);
+    setStepInputEdits({});
   };
 
   const handleClearTrace = () => {
@@ -135,6 +141,8 @@ export default function Sidebar(props: SidebarProps) {
     setInspectorOpen(false);
     setParamsOpen(true);
     setBodyOpen(true);
+    setExpandedStep(null);
+    setStepInputEdits({});
   };
 
   // Expand Inspector and scroll when a node is selected, collapse if deselected
@@ -409,6 +417,9 @@ export default function Sidebar(props: SidebarProps) {
                     </div>
                     {traceSteps.slice(0, traceVisible).map((step, i) => {
                       const colors = KIND_COLORS[step.kind] || KIND_COLORS.business_logic;
+                      const isExpanded = expandedStep === i;
+                      const rawInput = stepInputEdits[i] ?? (step.inputPayload != null ? JSON.stringify(step.inputPayload, null, 2) : "");
+                      const hasPayloads = step.inputPayload != null || step.outputPayload != null;
                       return (
                         <div
                           key={i}
@@ -430,8 +441,8 @@ export default function Sidebar(props: SidebarProps) {
                             </div>
                           )}
                           <div
-                            className="bg-[#111114] rounded-md p-3 hover:bg-[#14141a] transition-colors relative"
-                            style={{ border: `0.5px solid ${colors.border}33` }}
+                            className="bg-[#111114] rounded-md p-3 transition-colors relative"
+                            style={{ border: `0.5px solid ${isExpanded ? colors.border + '88' : colors.border + '33'}` }}
                           >
                             <div className="flex items-center gap-2 mb-1">
                               <div
@@ -441,12 +452,66 @@ export default function Sidebar(props: SidebarProps) {
                                 {KIND_LABELS[step.kind] || step.kind.toUpperCase()}
                               </div>
                               <span className="text-[10px] text-[#bbb] font-medium">{step.name}</span>
-                              <div className="ml-auto w-5 h-5 shrink-0 rounded-full bg-[#378ADD] flex items-center justify-center text-[9px] font-bold text-white shadow-sm ring-1 ring-black/20">
-                                {i + 1}
+                              <div className="ml-auto flex items-center gap-1.5">
+                                {hasPayloads && (
+                                  <button
+                                    onClick={() => setExpandedStep(isExpanded ? null : i)}
+                                    className="text-[8px] px-1.5 py-0.5 rounded border-[0.5px] border-[#2a2a2e] text-[#555] hover:text-[#378ADD] hover:border-[#378ADD] transition-colors bg-transparent cursor-pointer"
+                                    title={isExpanded ? "Hide I/O" : "Inspect I/O"}
+                                  >
+                                    {isExpanded ? "▲ I/O" : "▼ I/O"}
+                                  </button>
+                                )}
+                                <div className="w-5 h-5 shrink-0 rounded-full bg-[#378ADD] flex items-center justify-center text-[9px] font-bold text-white shadow-sm ring-1 ring-black/20">
+                                  {i + 1}
+                                </div>
                               </div>
                             </div>
                             {step.description && (
                               <div className="text-[9px] text-[#666] leading-relaxed">{step.description}</div>
+                            )}
+                            {isExpanded && (
+                              <div className="mt-2.5 space-y-2">
+                                {step.inputPayload != null && (
+                                  <div>
+                                    <div className="text-[8px] text-[#555] tracking-wider font-semibold mb-1">INPUT</div>
+                                    <textarea
+                                      value={rawInput}
+                                      onChange={(e) => setStepInputEdits((prev) => ({ ...prev, [i]: e.target.value }))}
+                                      spellCheck={false}
+                                      className="w-full min-h-[80px] bg-[#0d0d0f] border-[0.5px] border-[#2a2a2e] rounded px-2 py-1.5 text-[10px] text-[#ccc] font-mono outline-none resize-y leading-relaxed box-border"
+                                    />
+                                    {stepInputEdits[i] != null && (
+                                      <button
+                                        onClick={() => {
+                                          try {
+                                            const parsed = JSON.parse(stepInputEdits[i]);
+                                            rerunFromStep(i, step.nodeId, parsed);
+                                            // Clear stale edits for this step and all later steps
+                                            setStepInputEdits((prev) => {
+                                              const n = { ...prev };
+                                              Object.keys(n).forEach((k) => { if (Number(k) >= i) delete n[Number(k)]; });
+                                              return n;
+                                            });
+                                            // Keep panel open so user sees the updated input/output
+                                          } catch { /* invalid JSON */ }
+                                        }}
+                                        className="mt-1 w-full bg-[#378ADD] hover:bg-[#4a9bef] text-white text-[9px] font-semibold py-1 rounded cursor-pointer border-none transition-colors"
+                                      >
+                                        Run from step {i + 1}
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                                {step.outputPayload != null && (
+                                  <div>
+                                    <div className="text-[8px] text-[#555] tracking-wider font-semibold mb-1">OUTPUT <span className="text-[#333] normal-case tracking-normal font-normal">(precomputed)</span></div>
+                                    <pre className="bg-[#0d0d0f] border-[0.5px] border-[#2a2a2e] rounded px-2 py-1.5 text-[10px] text-[#aaa] font-mono overflow-x-auto leading-relaxed whitespace-pre-wrap break-all">
+                                      {JSON.stringify(step.outputPayload, null, 2)}
+                                    </pre>
+                                  </div>
+                                )}
+                              </div>
                             )}
                           </div>
                         </div>

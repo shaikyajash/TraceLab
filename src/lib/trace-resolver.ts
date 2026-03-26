@@ -12,61 +12,8 @@
  *   4. Return the resolved trace with concrete steps.
  */
 
-import { ComponentsGraph, RouteTrace, StepCondition, TraceStepDef } from './schema';
-
-// ─── Condition evaluator ─────────────────────────────────────────────
-
-function getField(payload: Record<string, unknown>, field: string): unknown {
-  const parts = field.split('.');
-  let current: unknown = payload;
-  for (const part of parts) {
-    if (current === null || current === undefined || typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current;
-}
-
-function evaluateCondition(cond: StepCondition, payload: Record<string, unknown>): boolean {
-  const fieldValue = getField(payload, cond.field);
-
-  switch (cond.op) {
-    case 'eq':
-      return fieldValue === cond.value;
-
-    case 'neq':
-      return fieldValue !== cond.value;
-
-    case 'in':
-      return Array.isArray(cond.value) && cond.value.includes(String(fieldValue));
-
-    case 'not_in':
-      return Array.isArray(cond.value) && !cond.value.includes(String(fieldValue));
-
-    case 'exists':
-      return fieldValue !== undefined && fieldValue !== null;
-
-    case 'not_exists':
-      return fieldValue === undefined || fieldValue === null;
-
-    case 'eq_field':
-      // Compare field value against another field's value
-      return typeof cond.value === 'string' && fieldValue === getField(payload, cond.value);
-
-    case 'neq_field':
-      return typeof cond.value === 'string' && fieldValue !== getField(payload, cond.value);
-
-    default:
-      return true;
-  }
-}
-
-function matchesAll(
-  conditions: StepCondition[] | undefined,
-  payload: Record<string, unknown>,
-): boolean {
-  if (!conditions || conditions.length === 0) return true;
-  return conditions.every((c) => evaluateCondition(c, payload));
-}
+import { ComponentsGraph, RouteTrace, TraceStepDef } from './schema';
+import { evaluateCondition, matchesAll } from './conditions';
 
 // ─── Trace resolver ──────────────────────────────────────────────────
 
@@ -90,10 +37,7 @@ export function resolveTrace(
   const traces = graph.traces?.filter((t) => t.route_id === routeId) ?? [];
   if (traces.length === 0) return null;
 
-  const payload =
-    typeof inputPayload === 'object' && inputPayload !== null
-      ? (inputPayload as Record<string, unknown>)
-      : {};
+  const payload = inputPayload;
 
   // Try each trace in order — first match wins
   for (const trace of traces) {

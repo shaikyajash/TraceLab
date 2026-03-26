@@ -1,5 +1,11 @@
 import { DiscoveredService, PerServiceResult, CrossServiceCall } from './schema';
-import { buildPerServicePrompt, buildCrossServicePrompt, buildTracesOnlyPrompt, SOURCE_CHAR_LIMITS, type ChunkInfo } from './prompts';
+import {
+  buildPerServicePrompt,
+  buildCrossServicePrompt,
+  buildTracesOnlyPrompt,
+  SOURCE_CHAR_LIMITS,
+  type ChunkInfo,
+} from './prompts';
 import { chat, getModelName as _getModelName, getConfig } from './llm';
 import { resolveExternalTypes, type ResolvedExternalType } from './external-types';
 import { validatePerServiceResult } from './validator';
@@ -44,17 +50,29 @@ function mergePartialResults(parts: PerServiceResult[]): PerServiceResult {
 
   for (const part of parts) {
     for (const n of part.nodes) {
-      if (!seenNodes.has(n.id)) { seenNodes.add(n.id); nodes.push(n); }
+      if (!seenNodes.has(n.id)) {
+        seenNodes.add(n.id);
+        nodes.push(n);
+      }
     }
     for (const e of part.edges) {
       const key = `${e.from}→${e.to}`;
-      if (!seenEdges.has(key)) { seenEdges.add(key); edges.push(e); }
+      if (!seenEdges.has(key)) {
+        seenEdges.add(key);
+        edges.push(e);
+      }
     }
     for (const m of part.mutations) {
-      if (!seenMutations.has(m.id)) { seenMutations.add(m.id); mutations.push(m); }
+      if (!seenMutations.has(m.id)) {
+        seenMutations.add(m.id);
+        mutations.push(m);
+      }
     }
     for (const p of part.external_packages) {
-      if (!seenPackages.has(p.crate)) { seenPackages.add(p.crate); external_packages.push(p); }
+      if (!seenPackages.has(p.crate)) {
+        seenPackages.add(p.crate);
+        external_packages.push(p);
+      }
     }
     for (const t of part.traces ?? []) {
       traces.push(t);
@@ -104,7 +122,8 @@ async function runAnalysisCall(
     );
     try {
       const repairStr = await chat({
-        system: 'You are fixing a JSON analysis that has validation errors. Return ONLY the corrected full JSON. No prose, no markdown fences.',
+        system:
+          'You are fixing a JSON analysis that has validation errors. Return ONLY the corrected full JSON. No prose, no markdown fences.',
         user: buildRepairPrompt(result, validation.repairInstructions),
       });
       result = parseResult(repairStr);
@@ -183,12 +202,13 @@ export async function analyzeService(
   // Step 3: Analyze each chunk (sequentially to respect rate limits)
   const partialResults: PerServiceResult[] = [];
   for (let i = 0; i < chunks.length; i++) {
-    const chunkInfo: ChunkInfo | undefined = chunks.length > 1
-      ? { index: i + 1, total: chunks.length, allFileNames }
-      : undefined;
+    const chunkInfo: ChunkInfo | undefined =
+      chunks.length > 1 ? { index: i + 1, total: chunks.length, allFileNames } : undefined;
 
     if (chunkInfo) {
-      options?.onProgress?.(`Analyzing chunk ${i + 1}/${chunks.length} of ${service.name} (${chunks[i].length} files)...`);
+      options?.onProgress?.(
+        `Analyzing chunk ${i + 1}/${chunks.length} of ${service.name} (${chunks[i].length} files)...`,
+      );
     }
 
     const chunkService: DiscoveredService = { ...service, rsFiles: chunks[i] };

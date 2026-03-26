@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import type { ComponentsGraph, ComponentNode, PayloadEdge, ScanProgress, StepCondition, TraceStep } from "@/types";
+import type { ComponentsGraph, ComponentNode, PayloadEdge, ScanProgress, TraceStep, TraceStepDef } from "@/types";
+import { resolveTrace } from '@/lib/trace-resolver';
+import { resolveNodeOutput } from '@/lib/simulation';
 import {
   CORE_KINDS,
   NODE_W,
@@ -120,75 +122,6 @@ function layoutNodes(
   return positions;
 }
 
-function smartTrace(
-  startId: string,
-  edges: PayloadEdge[],
-  coreIds: Set<string>,
-  nodeMap: Map<string, ComponentNode>,
-  payload: Record<string, unknown>
-): TraceStep[] {
-  const out = new Map<string, Array<{ to: string; payload: string }>>();
-  for (const e of edges) {
-    if (!coreIds.has(e.from) || !coreIds.has(e.to)) continue;
-    if (!out.has(e.from)) out.set(e.from, []);
-    out.get(e.from)!.push({ to: e.to, payload: e.payload });
-  }
-
-  const hints: string[] = [];
-  for (const v of Object.values(payload)) {
-    if (typeof v === "string") hints.push(v.toLowerCase());
-  }
-
-  const visited = new Set<string>();
-  const steps: TraceStep[] = [];
-  const queue: Array<{ id: string; edgeLabel: string }> = [{ id: startId, edgeLabel: "" }];
-  visited.add(startId);
-
-  while (queue.length > 0) {
-    const { id, edgeLabel } = queue.shift()!;
-    const node = nodeMap.get(id);
-    steps.push({
-      nodeId: id,
-      name: node?.name || id,
-      kind: node?.kind || "function",
-      description: node?.description || "",
-      edgeLabel,
-      inputType: node?.input ?? null,
-      outputType: node?.output ?? null,
-    });
-
-    const children = out.get(id) || [];
-    if (children.length === 0) continue;
-
-    if (hints.length > 0 && children.length > 1) {
-      const scored = children.map((c) => {
-        const label = c.payload.toLowerCase();
-        let score = 0;
-        for (const h of hints) {
-          if (label.includes(h)) score += 10;
-        }
-        return { ...c, score };
-      });
-      const maxScore = Math.max(...scored.map((s) => s.score));
-      const filtered = maxScore > 0 ? scored.filter((s) => s.score === maxScore) : scored;
-      for (const c of filtered) {
-        if (!visited.has(c.to)) {
-          visited.add(c.to);
-          queue.push({ id: c.to, edgeLabel: c.payload });
-        }
-      }
-    } else {
-      for (const c of children) {
-        if (!visited.has(c.to)) {
-          visited.add(c.to);
-          queue.push({ id: c.to, edgeLabel: c.payload });
-        }
-      }
-    }
-  }
-
-  return steps;
-}
 
 export default function Home() {
   const [graph, setGraph] = useState<ComponentsGraph | null>(null);
@@ -652,65 +585,33 @@ export default function Home() {
       payload = JSON.parse(reqBody) as Record<string, unknown>;
     } catch { /* empty */ }
 
-    let steps: TraceStep[];
+    const resolved = resolveTrace(graph, traceRouteId, payload);
 
-    const precomputed = graph.traces?.filter((t) => t.route_id === traceRouteId) || [];
-    if (precomputed.length > 0) {
-      /* evaluate match/when conditions deterministically */
-      const evalCond = (c: StepCondition, p: Record<string, unknown>): boolean => {
-        const v = p[c.field];
-        switch (c.op) {
-          case "eq": return v === c.value;
-          case "neq": return v !== c.value;
-          case "in": return Array.isArray(c.value) && c.value.includes(String(v));
-          case "not_in": return Array.isArray(c.value) && !c.value.includes(String(v));
-          case "exists": return v !== undefined && v !== null;
-          case "not_exists": return v === undefined || v === null;
-          case "eq_field": return typeof c.value === "string" && v === p[c.value];
-          case "neq_field": return typeof c.value === "string" && v !== p[c.value];
-          default: return true;
-        }
-      };
-
-      /* first trace where ALL match conditions pass wins (order matters) */
-      let bestTrace = precomputed[precomputed.length - 1];
-      for (const trace of precomputed) {
-        const conds = trace.match;
-        if (!conds || conds.length === 0) continue;
-        if (conds.every((c) => evalCond(c, payload))) { bestTrace = trace; break; }
-      }
-      /* if nothing matched, use first unconditional trace */
-      if (!bestTrace.match || bestTrace.match.length === 0) {
-        for (const trace of precomputed) {
-          if (!trace.match || trace.match.length === 0) { bestTrace = trace; break; }
-        }
-      }
-
-      /* filter steps by "when" conditions */
-      const traceStepsRaw = bestTrace.steps
-        .filter((s) => !s.when || evalCond(s.when, payload))
-        .map((s) => {
-          const node = nodeMap.get(s.node_id);
-          return {
-            nodeId: s.node_id,
-            name: node?.name || s.node_id,
-            kind: node?.kind || "function",
-            description: s.summary,
-            edgeLabel: s.edge_label,
-            inputType: node?.input ?? null,
-            outputType: node?.output ?? null,
-          };
-        });
-
-      /* if LLM trace is degenerate (only the start node repeated), fall back to graph walk */
-      const uniqueNodes = new Set(traceStepsRaw.map((s) => s.nodeId));
-      const isDegenerate = uniqueNodes.size <= 1;
-      steps = isDegenerate
-        ? smartTrace(traceRouteId, coreEdges, coreNodeIds, nodeMap, payload)
-        : traceStepsRaw;
-    } else {
-      steps = smartTrace(traceRouteId, coreEdges, coreNodeIds, nodeMap, payload);
+    if (!resolved) {
+      setIsTracing(false);
+      return;
     }
+
+    const { steps: resolvedStepDefs } = resolved;
+
+    let currentPayload: unknown = payload;
+    const steps: TraceStep[] = resolvedStepDefs.map((s) => {
+      const node = nodeMap.get(s.node_id);
+      const inputPayload = currentPayload;
+      const outputPayload = node ? resolveNodeOutput(node, inputPayload) : inputPayload;
+      currentPayload = outputPayload;
+      return {
+        nodeId: s.node_id,
+        name: node?.name || s.node_id,
+        kind: node?.kind || 'function',
+        description: s.summary,
+        edgeLabel: s.edge_label,
+        inputType: node?.input ?? null,
+        outputType: node?.output ?? null,
+        inputPayload,
+        outputPayload,
+      };
+    });
 
     setTraceSteps(steps);
 
@@ -732,7 +633,7 @@ export default function Home() {
 
     setIsTracing(false);
     setTimeout(() => setTraceHeadId(null), TRACE_HEAD_CLEAR_DELAY);
-  }, [traceRouteId, graph, coreEdges, coreNodeIds, nodeMap, reqBody, breakpoints]);
+  }, [traceRouteId, graph, nodeMap, reqBody, breakpoints]);
 
   const resumeSimulation = useCallback(async () => {
     if (!traceSteps.length || traceVisible >= traceSteps.length) return;
@@ -786,6 +687,70 @@ export default function Home() {
     setIsPausedAtBreakpoint(false);
     setCurrentBreakpointId(null);
   }, []);
+
+  /** Re-run payload propagation from a given step with a new input, re-selecting the trace. */
+  const rerunFromStep = useCallback((stepIndex: number, nodeId: string, newInput: unknown) => {
+    if (!graph || !traceRouteId) return;
+
+    const resolved = resolveTrace(graph, traceRouteId, newInput);
+
+    let relevantStepDefs: TraceStepDef[];
+    let insertAt: number;
+
+    if (resolved) {
+      const newStartIdx = resolved.steps.findIndex((s) => s.node_id === nodeId);
+      if (newStartIdx >= 0) {
+        // Node found in new trace — start the tail from there
+        relevantStepDefs = resolved.steps.slice(newStartIdx);
+        insertAt = stepIndex;
+      } else {
+        // Node not in new trace — replace everything from step 0 with the full new trace
+        relevantStepDefs = resolved.steps;
+        insertAt = 0;
+      }
+    } else {
+      // No matching trace — update payloads in place for existing steps
+      setTraceSteps((prev) => {
+        const updated = [...prev];
+        let current = newInput;
+        for (let i = stepIndex; i < updated.length; i++) {
+          const node = nodeMap.get(updated[i].nodeId);
+          const out = node ? resolveNodeOutput(node, current) : current;
+          updated[i] = { ...updated[i], inputPayload: current, outputPayload: out };
+          current = out;
+        }
+        return updated;
+      });
+      return;
+    }
+
+    let current = newInput;
+    const updatedTail: TraceStep[] = relevantStepDefs.map((s) => {
+      const node = nodeMap.get(s.node_id);
+      const inputPayload = current;
+      const outputPayload = node ? resolveNodeOutput(node, inputPayload) : inputPayload;
+      current = outputPayload;
+      return {
+        nodeId: s.node_id,
+        name: node?.name || s.node_id,
+        kind: node?.kind || 'function',
+        description: s.summary,
+        edgeLabel: s.edge_label,
+        inputType: node?.input ?? null,
+        outputType: node?.output ?? null,
+        inputPayload,
+        outputPayload,
+      };
+    });
+
+    setTraceSteps((prev) => [...prev.slice(0, insertAt), ...updatedTail]);
+    setTraceVisible(insertAt + updatedTail.length);
+    setActiveTraceIds((prev) => {
+      const next = new Set(prev);
+      for (const step of updatedTail) next.add(step.nodeId);
+      return next;
+    });
+  }, [graph, traceRouteId, nodeMap]);
 
   /* landing screen */
   if (!graph) {
@@ -884,6 +849,7 @@ export default function Home() {
               setIsGraphUnloading={setIsGraphUnloading}
               toggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               isPausedAtBreakpoint={isPausedAtBreakpoint}
+              rerunFromStep={rerunFromStep}
             />
           )}
         </div>

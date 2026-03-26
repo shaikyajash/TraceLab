@@ -20,7 +20,7 @@ export interface ComponentsGraph {
 /** Condition for matching a trace to a payload or filtering a step */
 export interface StepCondition {
   field: string;
-  op: 'eq' | 'neq' | 'in' | 'not_in' | 'exists' | 'not_exists' | 'eq_field' | 'neq_field';
+  op: 'eq' | 'neq' | 'in' | 'not_in' | 'exists' | 'not_exists' | 'eq_field' | 'neq_field' | 'eq_type';
   value?: string | string[];
 }
 
@@ -50,6 +50,16 @@ export interface ServiceInfo {
   description: string;
 }
 
+/** One output case for a node — first case where ALL match conditions pass wins.
+ *  If no cases match (or output_cases is absent), falls back to example_output ?? inputPayload. */
+export interface NodeOutputCase {
+  /** If set, ALL conditions must pass. Empty array = unconditional fallback. */
+  match?: StepCondition[];
+  output: Record<string, unknown> | unknown[] | string | number | boolean | null;
+  /** Optional human-readable explanation for this output case */
+  explanation?: string;
+}
+
 export interface ComponentNode {
   id: string;
   service: string;
@@ -57,14 +67,15 @@ export interface ComponentNode {
     | 'route_handler'
     | 'transformer'
     | 'validator'
-    | 'middls'
+    | 'middleware'
     | 'business_logic'
     | 'db_call'
     | 'external_http_call'
     | 'struct'
     | 'enum'
     | 'message_queue'
-    | 'function';
+    | 'function'
+    | 'background_process';
 
   name: string;
   input?: string;
@@ -82,6 +93,8 @@ export interface ComponentNode {
   example_payload?: string;
   example_input?: Record<string, unknown> | null;
   example_output?: Record<string, unknown> | null;
+  /** Conditional output cases — resolved deterministically from the input payload at simulation time */
+  output_cases?: NodeOutputCase[];
   port?: number;
 }
 
@@ -193,6 +206,8 @@ export interface SimulationEvent {
 }
 
 export interface SimulationRequest {
+  /** If set, stop simulation after this many steps (e.g. 1 = single-node dry run) */
+  max_steps?: number;
   graph: ComponentsGraph;
   start_node_id: string;
   initial_payload: unknown;

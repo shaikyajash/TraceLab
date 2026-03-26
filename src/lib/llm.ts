@@ -12,7 +12,7 @@ interface LLMConfig {
 const PROVIDER_CONFIGS: Record<LLMProvider, { model: string }> = {
   claude: { model: 'claude-opus-4-6' },
   gemini: { model: 'gemini-flash-latest' },
-  openai: { model: 'gpt-5.4-pro-2026-03-05' },
+  openai: { model: 'gpt-5.4-2026-03-05' },
 };
 
 // Gemini free tier: 2 req/min → enforce 31s minimum gap between calls
@@ -144,6 +144,8 @@ export async function chat(opts: {
   }
 }
 
+const LLM_CALL_TIMEOUT_MS = 8 * 60 * 1000; // 8 minutes per individual attempt
+
 async function chatClaude(opts: {
   model: string;
   system: string;
@@ -152,13 +154,23 @@ async function chatClaude(opts: {
   temperature: number;
 }): Promise<string> {
   const client = new Anthropic();
-  const response = await client.messages.create({
-    model: opts.model,
-    max_tokens: opts.maxTokens,
-    temperature: opts.temperature,
-    system: opts.system,
-    messages: [{ role: 'user', content: opts.user }],
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), LLM_CALL_TIMEOUT_MS);
+  let response: Awaited<ReturnType<typeof client.messages.create>>;
+  try {
+    response = await client.messages.create(
+      {
+        model: opts.model,
+        max_tokens: opts.maxTokens,
+        temperature: opts.temperature,
+        system: opts.system,
+        messages: [{ role: 'user', content: opts.user }],
+      },
+      { signal: controller.signal },
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 
   const textBlock = response.content.find((b) => b.type === 'text');
   if (!textBlock || textBlock.type !== 'text') {
@@ -210,7 +222,7 @@ async function chatOpenAI(opts: {
     throw new Error('OPENAI_API_KEY environment variable is required when using OpenAI');
   }
 
-  const client = new OpenAI({ apiKey });
+  const client = new OpenAI({ apiKey, timeout: LLM_CALL_TIMEOUT_MS });
 
   // Some OpenAI models reject temperature (reasoning family + GPT-5 family).
   const disallowTemperature = /^o\d/i.test(opts.model) || /^gpt-5/i.test(opts.model);
@@ -220,12 +232,9 @@ async function chatOpenAI(opts: {
       { role: 'system', content: opts.system },
       { role: 'user', content: opts.user },
     ],
-    ...(disallowTemperature
-      ? {}
-      : {
-          temperature: opts.temperature,
-          text: { format: { type: 'json_object' as const } },
-        }),
+    // Always request JSON output; only pass temperature on models that accept it
+    text: { format: { type: 'json_object' as const } },
+    ...(disallowTemperature ? {} : { temperature: opts.temperature }),
   });
 
   const text = response.output_text;
