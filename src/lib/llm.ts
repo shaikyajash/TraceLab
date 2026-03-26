@@ -31,28 +31,48 @@ function withGeminiRateLimit<T>(fn: () => Promise<T>): Promise<T> {
 
 // OpenAI TPM serialisation — serialize all calls so we never overlap within the same minute
 
-// Parse "Please try again in 3.55s" from a 429 error message
-function parseRetryAfterMs(message: string): number {
-  const m = message.match(/try again in (\d+(?:\.\d+)?)s/i);
-  return m ? Math.ceil(parseFloat(m[1]) * 1000) + 500 : 62_000;
+// Detect rate limit errors across all providers
+function isRateLimitError(err: unknown): boolean {
+  if (err && typeof err === 'object') {
+    // OpenAI SDK APIError has a .status property
+    if ('status' in err && (err as { status: unknown }).status === 429) return true;
+    // Some SDKs expose a numeric or string code
+    if ('code' in err) {
+      const c = (err as { code: unknown }).code;
+      if (c === 429 || c === '429' || c === 'rate_limited' || c === '1300') return true;
+    }
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.includes('429') || /rate.?limit/i.test(msg) || msg.includes('1300');
 }
 
-async function withOpenAIRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+// Parse "Please try again in 3.55s" or "Retry-After: 30" from error text
+function parseRetryAfterMs(message: string): number | null {
+  const secsMatch = message.match(/try again in (\d+(?:\.\d+)?)s/i);
+  if (secsMatch) return Math.ceil(parseFloat(secsMatch[1]) * 1000) + 500;
+  const headerMatch = message.match(/retry.?after[:\s]+(\d+)/i);
+  if (headerMatch) return parseInt(headerMatch[1], 10) * 1000 + 500;
+  return null;
+}
+
+// Generic retry with exponential backoff + jitter — works for all providers
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 6): Promise<T> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (err) {
+      if (!isRateLimitError(err) || attempt >= maxRetries) throw err;
       const msg = err instanceof Error ? err.message : String(err);
-      const is429 = msg.includes('429') || msg.toLowerCase().includes('rate limit');
-      if (is429 && attempt < maxRetries) {
-        const wait = parseRetryAfterMs(msg);
-        await new Promise((r) => setTimeout(r, wait));
-        continue;
-      }
-      throw err;
+      const serverWait = parseRetryAfterMs(msg);
+      // Exponential backoff: 5s → 10s → 20s → 40s → 80s → 90s, capped at 90s
+      const expDelay = Math.min(5_000 * Math.pow(2, attempt), 90_000);
+      const jitter = Math.floor(Math.random() * 3_000); // 0–3s jitter avoids thundering herd
+      const delay = (serverWait !== null ? serverWait : expDelay) + jitter;
+      console.warn(`[llm] Rate limited (attempt ${attempt + 1}/${maxRetries + 1}). Retrying in ${Math.round(delay / 1000)}s...`);
+      await new Promise((r) => setTimeout(r, delay));
     }
   }
-  throw new Error('OpenAI retry limit exceeded');
+  throw new Error('Rate limit retry exhausted');
 }
 
 // Runtime override — set by API routes per-request
@@ -112,12 +132,13 @@ export async function chat(opts: {
   const { system, user, maxTokens = defaultMaxTokens, temperature = 0 } = opts;
 
   if (provider === 'claude') {
-    return chatClaude({ model, system, user, maxTokens, temperature });
+    return withRetry(() => chatClaude({ model, system, user, maxTokens, temperature }));
   } else if (provider === 'openai') {
-    // Retry handles 429s; no queue needed — 500k TPM allows parallel requests
-    return withOpenAIRetry(() => chatOpenAI({ model, system, user, maxTokens, temperature }));
+    return withRetry(() => chatOpenAI({ model, system, user, maxTokens, temperature }));
   } else {
-    return withGeminiRateLimit(() => chatGemini({ model, system, user, maxTokens, temperature }));
+    return withGeminiRateLimit(() =>
+      withRetry(() => chatGemini({ model, system, user, maxTokens, temperature })),
+    );
   }
 }
 
