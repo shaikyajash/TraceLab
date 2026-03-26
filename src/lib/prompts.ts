@@ -1,9 +1,26 @@
 import { DiscoveredService } from './schema';
 import { type ResolvedExternalType, formatExternalTypesForPrompt } from './external-types';
 
+// ~4 chars per token. Leave room for system prompt (~3k tokens = 12k chars) and output.
+// OpenAI free tier: 30k TPM → cap source at 80k chars (~20k tokens)
+// Gemini flash: 1M context → 400k chars is fine
+// Claude: 200k context → no cap needed
+export const SOURCE_CHAR_LIMITS: Record<string, number> = {
+  openai: 80_000,
+  gemini: 400_000,
+  claude: Infinity,
+};
+
+export interface ChunkInfo {
+  index: number;   // 1-based
+  total: number;
+  allFileNames: string[];
+}
+
 export function buildPerServicePrompt(
   service: DiscoveredService,
   externalTypes?: ResolvedExternalType[],
+  chunkInfo?: ChunkInfo,
 ): {
   system: string;
   user: string;
@@ -307,7 +324,17 @@ EXAMPLE OUTPUT SHAPE (generic — replace all placeholders with real values)
     ? `\n\nEXTERNAL TYPE DEFINITIONS\n${'─'.repeat(40)}\nThe following types are defined in external crates used by this service.\nUse ONLY these exact definitions for enum variants, struct fields, and serde behavior.\nDo NOT guess or invent anything not listed here.\n\n${externalTypesContext}`
     : '';
 
-  const user = `Analyze the Rust service "${service.name}" (path: "${service.path}").
+  const chunkHeader = chunkInfo
+    ? `CHUNKED ANALYSIS — chunk ${chunkInfo.index} of ${chunkInfo.total}.
+All files in this service: ${chunkInfo.allFileNames.join(', ')}
+You are only seeing a SUBSET of files in this chunk. Extract only what is defined in these files.
+Do NOT invent nodes or edges for files you cannot see. Other chunks will cover them.
+Still output a complete, valid JSON object — just with partial nodes/edges/traces for this chunk.
+
+`
+    : '';
+
+  const user = `${chunkHeader}Analyze the Rust service "${service.name}" (path: "${service.path}").
 
 BEFORE writing any output, do this analysis mentally:
   1. Read every file completely.

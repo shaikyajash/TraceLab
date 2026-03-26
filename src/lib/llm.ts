@@ -11,9 +11,24 @@ interface LLMConfig {
 
 const PROVIDER_CONFIGS: Record<LLMProvider, { model: string }> = {
   claude: { model: 'claude-opus-4-6' },
-  gemini: { model: 'gemini-3.1-pro-preview' },
-  openai: { model: 'gpt-5.4-2026-03-05' },
+  gemini: { model: 'gemini-flash-latest' },
+  openai: { model: 'gpt-4o' },
 };
+
+// Gemini free tier: 2 req/min → enforce 31s minimum gap between calls
+let lastGeminiCallAt = 0;
+let geminiQueue = Promise.resolve();
+
+function withGeminiRateLimit<T>(fn: () => Promise<T>): Promise<T> {
+  geminiQueue = geminiQueue.then(async () => {
+    const elapsed = Date.now() - lastGeminiCallAt;
+    const wait = 31_000 - elapsed;
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastGeminiCallAt = Date.now();
+  });
+  // Run fn after the queue slot is acquired
+  return geminiQueue.then(fn) as Promise<T>;
+}
 
 // Runtime override — set by API routes per-request
 let runtimeProvider: LLMProvider | null = null;
@@ -74,7 +89,7 @@ export async function chat(opts: {
   } else if (provider === 'openai') {
     return chatOpenAI({ model, system, user, maxTokens, temperature });
   } else {
-    return chatGemini({ model, system, user, maxTokens, temperature });
+    return withGeminiRateLimit(() => chatGemini({ model, system, user, maxTokens, temperature }));
   }
 }
 

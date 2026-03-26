@@ -1,6 +1,6 @@
 import { DiscoveredService, PerServiceResult, CrossServiceCall } from './schema';
-import { buildPerServicePrompt, buildCrossServicePrompt } from './prompts';
-import { chat, getModelName as _getModelName } from './llm';
+import { buildPerServicePrompt, buildCrossServicePrompt, SOURCE_CHAR_LIMITS, type ChunkInfo } from './prompts';
+import { chat, getModelName as _getModelName, getConfig } from './llm';
 import { resolveExternalTypes, type ResolvedExternalType } from './external-types';
 import { validatePerServiceResult } from './validator';
 
@@ -30,6 +30,92 @@ CURRENT JSON:
 ${JSON.stringify(result, null, 2)}`;
 }
 
+function mergePartialResults(parts: PerServiceResult[]): PerServiceResult {
+  const seenNodes = new Set<string>();
+  const seenEdges = new Set<string>();
+  const seenMutations = new Set<string>();
+  const seenPackages = new Set<string>();
+
+  const nodes: PerServiceResult['nodes'] = [];
+  const edges: PerServiceResult['edges'] = [];
+  const mutations: PerServiceResult['mutations'] = [];
+  const external_packages: PerServiceResult['external_packages'] = [];
+  const traces: NonNullable<PerServiceResult['traces']> = [];
+
+  for (const part of parts) {
+    for (const n of part.nodes) {
+      if (!seenNodes.has(n.id)) { seenNodes.add(n.id); nodes.push(n); }
+    }
+    for (const e of part.edges) {
+      const key = `${e.from}→${e.to}`;
+      if (!seenEdges.has(key)) { seenEdges.add(key); edges.push(e); }
+    }
+    for (const m of part.mutations) {
+      if (!seenMutations.has(m.id)) { seenMutations.add(m.id); mutations.push(m); }
+    }
+    for (const p of part.external_packages) {
+      if (!seenPackages.has(p.crate)) { seenPackages.add(p.crate); external_packages.push(p); }
+    }
+    for (const t of part.traces ?? []) {
+      traces.push(t);
+    }
+  }
+
+  return { service: parts[0].service, nodes, edges, mutations, external_packages, traces };
+}
+
+// ─── Single-chunk LLM call + parse + repair ──────────────────────────
+
+async function runAnalysisCall(
+  service: DiscoveredService,
+  externalTypes: ResolvedExternalType[],
+  chunkInfo: ChunkInfo | undefined,
+  options: AnalyzeOptions | undefined,
+  label: string,
+): Promise<PerServiceResult> {
+  const { system, user } = buildPerServicePrompt(service, externalTypes, chunkInfo);
+
+  let jsonStr: string;
+  try {
+    jsonStr = await chat({ system, user });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`LLM call failed for ${label}: ${reason}`);
+  }
+
+  let result: PerServiceResult;
+  try {
+    result = parseResult(jsonStr);
+  } catch {
+    const fixed = await chat({
+      system: 'Fix the following invalid JSON. Return ONLY valid JSON, nothing else.',
+      user: jsonStr,
+    });
+    result = parseResult(fixed);
+  }
+
+  const maxAttempts = options?.maxRepairAttempts ?? 3;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const validation = validatePerServiceResult(result, externalTypes);
+    if (validation.valid) break;
+
+    options?.onProgress?.(
+      `Validation found ${validation.errors.length} error(s) in ${label}, repairing (attempt ${attempt + 1}/${maxAttempts})...`,
+    );
+    try {
+      const repairStr = await chat({
+        system: 'You are fixing a JSON analysis that has validation errors. Return ONLY the corrected full JSON. No prose, no markdown fences.',
+        user: buildRepairPrompt(result, validation.repairInstructions),
+      });
+      result = parseResult(repairStr);
+    } catch {
+      break;
+    }
+  }
+
+  return result;
+}
+
 // ─── Service analysis ────────────────────────────────────────────────
 
 export interface AnalyzeOptions {
@@ -57,7 +143,7 @@ export async function analyzeService(
     };
   }
 
-  // Step 1: Resolve external type definitions
+  // Step 1: Resolve external types
   let externalTypes: ResolvedExternalType[] = [];
   if (options?.workspacePath) {
     try {
@@ -69,64 +155,55 @@ export async function analyzeService(
         );
       }
     } catch {
-      // Non-fatal — proceed without external type context
+      // Non-fatal
     }
   }
 
-  // Step 2: Build prompt with external type context
-  const { system, user } = buildPerServicePrompt(service, externalTypes);
+  // Step 2: Split into chunks if service exceeds the provider's budget
+  const { provider } = getConfig();
+  const chunkBudget = SOURCE_CHAR_LIMITS[provider] ?? Infinity;
+  const allFileNames = service.rsFiles.map((f) => f.relativePath);
 
-  // Step 3: Call LLM
-  let jsonStr: string;
-  try {
-    jsonStr = await chat({ system, user });
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    throw new Error(`LLM call failed for service ${service.name}: ${reason}`);
+  const chunks: DiscoveredService['rsFiles'][] = [];
+  let current: DiscoveredService['rsFiles'] = [];
+  let currentSize = 0;
+
+  for (const file of service.rsFiles) {
+    const fileSize = file.content.length + file.relativePath.length + 40;
+    if (currentSize + fileSize > chunkBudget && current.length > 0) {
+      chunks.push(current);
+      current = [];
+      currentSize = 0;
+    }
+    current.push(file);
+    currentSize += fileSize;
   }
+  if (current.length > 0) chunks.push(current);
 
-  // Step 4: Parse (with JSON-fix retry)
-  let result: PerServiceResult;
-  try {
-    result = parseResult(jsonStr);
-  } catch {
-    const fixed = await chat({
-      system: 'Fix the following invalid JSON. Return ONLY valid JSON, nothing else.',
-      user: jsonStr,
-    });
-    result = parseResult(fixed);
-  }
+  // Step 3: Analyze each chunk (sequentially to respect rate limits)
+  const partialResults: PerServiceResult[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const chunkInfo: ChunkInfo | undefined = chunks.length > 1
+      ? { index: i + 1, total: chunks.length, allFileNames }
+      : undefined;
 
-  // Step 5: Validate and repair loop
-  const maxAttempts = options?.maxRepairAttempts ?? 3;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const validation = validatePerServiceResult(result, externalTypes);
-
-    if (validation.valid) {
-      if (attempt === 0 && validation.errors.length > 0) {
-        options?.onProgress?.(`Validation passed with ${validation.errors.length} warning(s)`);
-      }
-      break;
+    if (chunkInfo) {
+      options?.onProgress?.(`Analyzing chunk ${i + 1}/${chunks.length} of ${service.name} (${chunks[i].length} files)...`);
     }
 
-    options?.onProgress?.(
-      `Validation found ${validation.errors.length} error(s), repairing (attempt ${attempt + 1}/${maxAttempts})...`,
+    const chunkService: DiscoveredService = { ...service, rsFiles: chunks[i] };
+    const result = await runAnalysisCall(
+      chunkService,
+      externalTypes,
+      chunkInfo,
+      options,
+      chunks.length > 1 ? `${service.name} chunk ${i + 1}/${chunks.length}` : service.name,
     );
-
-    try {
-      const repairStr = await chat({
-        system:
-          'You are fixing a JSON analysis that has validation errors. Return ONLY the corrected full JSON. No prose, no markdown fences.',
-        user: buildRepairPrompt(result, validation.repairInstructions),
-      });
-      result = parseResult(repairStr);
-    } catch {
-      // Repair failed — use what we have
-      break;
-    }
+    partialResults.push(result);
   }
 
-  return result;
+  // Step 4: Merge if chunked, otherwise return directly
+  return chunks.length > 1 ? mergePartialResults(partialResults) : partialResults[0];
 }
 
 // ─── Cross-service analysis ──────────────────────────────────────────
