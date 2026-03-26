@@ -151,6 +151,8 @@ function smartTrace(
       kind: node?.kind || "function",
       description: node?.description || "",
       edgeLabel,
+      inputType: node?.input ?? null,
+      outputType: node?.output ?? null,
     });
 
     const children = out.get(id) || [];
@@ -576,6 +578,8 @@ export default function Home() {
             kind: node?.kind || "function",
             description: s.summary,
             edgeLabel: s.edge_label,
+            inputType: node?.input ?? null,
+            outputType: node?.output ?? null,
           };
         });
     } else {

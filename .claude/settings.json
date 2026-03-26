@@ -13,7 +13,16 @@
       "Read(//private/var/folders/wm/867twd854tv0zng60xyg5pk00000gr/T/**)",
       "Read(//Users/lohit/**)",
       "Bash(find /Users/lohit -name *.rs)",
-      "Read(//private/var/folders/**)"
+      "Read(//private/var/folders/**)",
+      "Bash(git fetch:*)",
+      "Bash(git merge:*)",
+      "Bash(for f:*)",
+      "Bash(do echo:*)",
+      "Bash(git diff:*)",
+      "Bash(done)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }
