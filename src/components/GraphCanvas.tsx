@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useRef, useCallback, useEffect } from "react";
 import type { ComponentNode, PayloadEdge, TraceStep } from "@/types";
 import { NODE_W, NODE_H, KIND_COLORS, KIND_LABELS, CANVAS_WIDTH, CANVAS_HEIGHT, MIN_SCALE, MAX_SCALE, SCALE_STEP } from "@/constants";
 
@@ -34,6 +35,7 @@ interface GraphCanvasProps {
   fitView: () => void;
   setScale: React.Dispatch<React.SetStateAction<number>>;
   exportGraph: () => void;
+  onNodeDrag: (nodeId: string, x: number, y: number) => void;
 }
 
 function edgePath(x1: number, y1: number, x2: number, y2: number): string {
@@ -74,7 +76,50 @@ export default function GraphCanvas(props: GraphCanvasProps) {
     fitView,
     setScale,
     exportGraph,
+    onNodeDrag,
   } = props;
+
+  // Node dragging state
+  const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
+  const dragStart = useRef<{ x: number; y: number; nodeX: number; nodeY: number } | null>(null);
+
+  const handleNodeMouseDown = useCallback((e: React.MouseEvent, nodeId: string, nodePos: { x: number; y: number }) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setDraggingNodeId(nodeId);
+    dragStart.current = {
+      x: e.clientX,
+      y: e.clientY,
+      nodeX: nodePos.x,
+      nodeY: nodePos.y,
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!draggingNodeId) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragStart.current) return;
+      const dx = (e.clientX - dragStart.current.x) / scale;
+      const dy = (e.clientY - dragStart.current.y) / scale;
+      const newX = dragStart.current.nodeX + dx;
+      const newY = dragStart.current.nodeY + dy;
+      onNodeDrag(draggingNodeId, newX, newY);
+    };
+
+    const handleMouseUp = () => {
+      setDraggingNodeId(null);
+      dragStart.current = null;
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [draggingNodeId, scale, onNodeDrag]);
 
   // Create a map of nodeId to all step numbers (for nodes that appear multiple times)
   // Only include steps that have been revealed (up to traceVisible)
@@ -268,14 +313,21 @@ export default function GraphCanvas(props: GraphCanvasProps) {
           const stepNumbers = nodeStepMap.get(node.id) || [];
           const isBreakpoint = breakpoints.has(node.id);
           const isPausedHere = isPausedAtBreakpoint && currentBreakpointId === node.id;
+          const isDragging = draggingNodeId === node.id;
 
           return (
             <div
               key={node.id}
               data-node
+              onMouseDown={(e) => {
+                if (!isGreyedOut && e.button === 0) {
+                  handleNodeMouseDown(e, node.id, pos);
+                }
+              }}
               onClick={(e) => {
                 e.stopPropagation();
-                if (!isGreyedOut) {
+                // Only trigger click if not dragging
+                if (!isDragging && !isGreyedOut) {
                   setSelectedId(node.id);
                   // Auto-open sidebar when clicking a node
                   if (isSidebarCollapsed) {
@@ -300,7 +352,7 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                   toggleBreakpoint(node.id);
                 }
               }}
-              className="absolute transition-all duration-200"
+              className={`absolute ${isDragging ? '' : 'transition-all duration-200'}`}
               style={{
                 left: pos.x,
                 top: pos.y,
@@ -320,9 +372,11 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                           : "1px solid #2a2a2e",
                 borderRadius: 10,
                 opacity: isGreyedOut ? 0.25 : 1,
-                cursor: isGreyedOut ? "not-allowed" : "pointer",
+                cursor: isDragging ? "grabbing" : isGreyedOut ? "not-allowed" : "grab",
                 overflow: "visible",
-                boxShadow: isPausedHere ? "0 0 20px rgba(245, 158, 11, 0.6)" : "none",
+                boxShadow: isPausedHere ? "0 0 20px rgba(245, 158, 11, 0.6)" : isDragging ? "0 8px 24px rgba(0,0,0,0.4)" : "none",
+                zIndex: isDragging ? 100 : undefined,
+                userSelect: "none",
               }}
             >
               {/* Breakpoint indicator - top right corner */}

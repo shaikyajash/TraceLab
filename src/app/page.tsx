@@ -11,6 +11,8 @@ import {
   DEFAULT_SCALE,
   DEFAULT_TX,
   DEFAULT_TY,
+  MIN_SCALE,
+  MAX_SCALE,
   DEFAULT_SIDEBAR_WIDTH,
   MIN_SIDEBAR_WIDTH,
   MAX_SIDEBAR_WIDTH,
@@ -337,9 +339,13 @@ export default function Home() {
   const [positions, setPositions] = useState<Map<string, { x: number; y: number }>>(
     new Map()
   );
+  const initialFitDone = useRef(false);
 
   useEffect(() => {
-    if (!graph) return;
+    if (!graph) {
+      initialFitDone.current = false;
+      return;
+    }
     setPositions(layoutNodes(coreNodes, coreEdges));
   }, [graph, coreNodes, coreEdges]);
 
@@ -535,12 +541,65 @@ export default function Home() {
   }, []);
 
   const fitView = useCallback(() => {
-    setScale(DEFAULT_SCALE);
-    // Adjust center position based on sidebar state
-    const offset = isSidebarCollapsed ? sidebarWidth / 2 : 0;
-    setTx(DEFAULT_TX + offset);
-    setTy(DEFAULT_TY);
-  }, [isSidebarCollapsed, sidebarWidth]);
+    if (positions.size === 0) {
+      // No nodes, reset to defaults
+      setScale(DEFAULT_SCALE);
+      setTx(DEFAULT_TX);
+      setTy(DEFAULT_TY);
+      return;
+    }
+
+    // Calculate bounding box of all nodes
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    positions.forEach(({ x, y }) => {
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x + NODE_W);
+      maxY = Math.max(maxY, y + NODE_H);
+    });
+
+    const graphWidth = maxX - minX;
+    const graphHeight = maxY - minY;
+
+    // Get viewport dimensions (accounting for sidebar)
+    const viewportWidth = typeof window !== 'undefined' 
+      ? window.innerWidth - (isSidebarCollapsed ? 0 : sidebarWidth) 
+      : 1200;
+    const viewportHeight = typeof window !== 'undefined' 
+      ? window.innerHeight 
+      : 800;
+
+    // Add padding around the graph
+    const padding = 60;
+    const availableWidth = viewportWidth - padding * 2;
+    const availableHeight = viewportHeight - padding * 2;
+
+    // Calculate scale to fit the graph
+    const scaleX = availableWidth / graphWidth;
+    const scaleY = availableHeight / graphHeight;
+    const newScale = Math.min(Math.max(Math.min(scaleX, scaleY), MIN_SCALE), MAX_SCALE);
+
+    // Calculate translation to center the graph
+    const scaledGraphWidth = graphWidth * newScale;
+    const scaledGraphHeight = graphHeight * newScale;
+    const newTx = (viewportWidth - scaledGraphWidth) / 2 - minX * newScale;
+    const newTy = (viewportHeight - scaledGraphHeight) / 2 - minY * newScale;
+
+    setScale(newScale);
+    setTx(newTx);
+    setTy(newTy);
+  }, [positions, isSidebarCollapsed, sidebarWidth]);
+
+  // Auto-fit view when graph is first loaded
+  useEffect(() => {
+    if (positions.size > 0 && !initialFitDone.current) {
+      initialFitDone.current = true;
+      // Small delay to ensure DOM is ready
+      requestAnimationFrame(() => {
+        fitView();
+      });
+    }
+  }, [positions, fitView]);
 
   const exportGraph = useCallback(() => {
     if (!graph) return;
@@ -552,6 +611,14 @@ export default function Home() {
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
   }, [graph]);
+
+  const handleNodeDrag = useCallback((nodeId: string, x: number, y: number) => {
+    setPositions(prev => {
+      const next = new Map(prev);
+      next.set(nodeId, { x, y });
+      return next;
+    });
+  }, []);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (!(e.target as HTMLElement).closest("[data-node]")) setSelectedId(null);
@@ -865,6 +932,7 @@ export default function Home() {
           fitView={fitView}
           setScale={setScale}
           exportGraph={exportGraph}
+          onNodeDrag={handleNodeDrag}
         />
       </div>
     </div>
