@@ -2,11 +2,11 @@
 
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import type { ComponentsGraph, ComponentNode, PayloadEdge, ScanProgress, StepCondition, TraceStep } from "@/types";
-import { 
-  CORE_KINDS, 
-  NODE_W, 
-  NODE_H, 
-  H_GAP, 
+import {
+  CORE_KINDS,
+  NODE_W,
+  NODE_H,
+  H_GAP,
   V_GAP,
   DEFAULT_SCALE,
   DEFAULT_TX,
@@ -490,6 +490,17 @@ export default function Home() {
     setTy(DEFAULT_TY);
   }, [isSidebarCollapsed, sidebarWidth]);
 
+  const exportGraph = useCallback(() => {
+    if (!graph) return;
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(graph, null, 2));
+    const downloadAnchorNode = document.createElement("a");
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", "servicelab.tracelab.json");
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  }, [graph]);
+
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (!(e.target as HTMLElement).closest("[data-node]")) setSelectedId(null);
   }, []);
@@ -638,94 +649,95 @@ export default function Home() {
         }
       `}</style>
 
-      <div 
+      <div
         className="flex w-full h-full"
         style={{
-          animation: isGraphUnloading 
-            ? "fadeOutBlur 0.4s ease-out" 
-            : isGraphLoaded 
-              ? "fadeInBlur 0.6s ease-out" 
+          animation: isGraphUnloading
+            ? "fadeOutBlur 0.4s ease-out"
+            : isGraphLoaded
+              ? "fadeInBlur 0.6s ease-out"
               : "none",
           opacity: isGraphUnloading ? 0 : isGraphLoaded ? 1 : 0,
           filter: isGraphUnloading ? "blur(8px)" : isGraphLoaded ? "blur(0px)" : "blur(8px)",
         }}
       >
 
-      <div 
-        className="h-full flex overflow-hidden"
-        style={{
-          width: isSidebarCollapsed ? 0 : sidebarWidth,
-          transition: "width 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-          opacity: isSidebarCollapsed ? 0 : 1,
-        }}
-      >
+        <div
+          className="h-full flex overflow-hidden"
+          style={{
+            width: isSidebarCollapsed ? 0 : sidebarWidth,
+            transition: "width 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+            opacity: isSidebarCollapsed ? 0 : 1,
+          }}
+        >
+          {!isSidebarCollapsed && (
+            <Sidebar
+              width={sidebarWidth}
+              routes={routes}
+              traceMethod={traceMethod}
+              traceRouteId={traceRouteId}
+              setTraceRouteId={setTraceRouteId}
+              setTraceMethod={setTraceMethod}
+              clearTrace={clearTrace}
+              setSelectedId={setSelectedId}
+              routePathParams={routePathParams}
+              pathParams={pathParams}
+              setPathParams={setPathParams}
+              reqBody={reqBody}
+              setReqBody={setReqBody}
+              runSimulation={runSimulation}
+              isTracing={isTracing}
+              traceSteps={traceSteps}
+              traceVisible={traceVisible}
+              selectedNode={selectedNode}
+              coreEdges={coreEdges}
+              nodeById={nodeById}
+              setGraph={setGraph}
+              setError={setError}
+              setIsGraphUnloading={setIsGraphUnloading}
+              toggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            />
+          )}
+        </div>
+
+        {/* Resize handle */}
         {!isSidebarCollapsed && (
-          <Sidebar
-            width={sidebarWidth}
-            routes={routes}
-            traceMethod={traceMethod}
-            traceRouteId={traceRouteId}
-            setTraceRouteId={setTraceRouteId}
-            setTraceMethod={setTraceMethod}
-            clearTrace={clearTrace}
-            setSelectedId={setSelectedId}
-            routePathParams={routePathParams}
-            pathParams={pathParams}
-            setPathParams={setPathParams}
-            reqBody={reqBody}
-            setReqBody={setReqBody}
-            runSimulation={runSimulation}
-            isTracing={isTracing}
-            traceSteps={traceSteps}
-            traceVisible={traceVisible}
-            selectedNode={selectedNode}
-            coreEdges={coreEdges}
-            nodeById={nodeById}
-            setGraph={setGraph}
-            setError={setError}
-            setIsGraphUnloading={setIsGraphUnloading}
-            toggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          <div
+            onMouseDown={handleResizeStart}
+            className="w-1 cursor-col-resize transition-colors duration-150 z-20 shrink-0 h-full"
+            style={{ background: isResizing ? "#378ADD" : "transparent" }}
+            onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "#333"; }}
+            onMouseLeave={(e) => { if (!isResizing) (e.target as HTMLElement).style.background = "transparent"; }}
           />
         )}
-      </div>
 
-      {/* Resize handle */}
-      {!isSidebarCollapsed && (
-        <div
-          onMouseDown={handleResizeStart}
-          className="w-1 cursor-col-resize transition-colors duration-150 z-20 shrink-0 h-full"
-          style={{ background: isResizing ? "#378ADD" : "transparent" }}
-          onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "#333"; }}
-          onMouseLeave={(e) => { if (!isResizing) (e.target as HTMLElement).style.background = "transparent"; }}
+        <GraphCanvas
+          coreNodes={coreNodes}
+          coreEdges={coreEdges}
+          positions={positions}
+          tx={tx}
+          ty={ty}
+          scale={scale}
+          isPanning={isPanning}
+          selectedId={selectedId}
+          activeTraceIds={activeTraceIds}
+          traceHeadId={traceHeadId}
+          traceSteps={traceSteps}
+          traceVisible={traceVisible}
+          isSidebarCollapsed={isSidebarCollapsed}
+          toggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          setSelectedId={(id) => {
+            setSelectedId(id);
+          }}
+          handleCanvasMouseDown={handleCanvasMouseDown}
+          handleCanvasMouseMove={handleCanvasMouseMove}
+          handleCanvasMouseUp={handleCanvasMouseUp}
+          handleWheel={handleWheel}
+          handleCanvasClick={handleCanvasClick}
+          fitView={fitView}
+          setScale={setScale}
+          exportGraph={exportGraph}
         />
-      )}
-
-      <GraphCanvas
-        coreNodes={coreNodes}
-        coreEdges={coreEdges}
-        positions={positions}
-        tx={tx}
-        ty={ty}
-        scale={scale}
-        isPanning={isPanning}
-        selectedId={selectedId}
-        activeTraceIds={activeTraceIds}
-        traceHeadId={traceHeadId}
-        traceSteps={traceSteps}
-        traceVisible={traceVisible}
-        isSidebarCollapsed={isSidebarCollapsed}
-        toggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-        setSelectedId={(id) => {
-          setSelectedId(id);
-        }}
-        handleCanvasMouseDown={handleCanvasMouseDown}
-        handleCanvasMouseMove={handleCanvasMouseMove}
-        handleCanvasMouseUp={handleCanvasMouseUp}
-        handleWheel={handleWheel}
-        handleCanvasClick={handleCanvasClick}
-        fitView={fitView}
-        setScale={setScale}
-      />
       </div>
     </div>
   );

@@ -26,6 +26,7 @@ interface GraphCanvasProps {
   handleCanvasClick: (e: React.MouseEvent) => void;
   fitView: () => void;
   setScale: React.Dispatch<React.SetStateAction<number>>;
+  exportGraph: () => void;
 }
 
 function edgePath(x1: number, y1: number, x2: number, y2: number): string {
@@ -58,6 +59,7 @@ export default function GraphCanvas(props: GraphCanvasProps) {
     handleCanvasClick,
     fitView,
     setScale,
+    exportGraph,
   } = props;
 
   // Create a map of nodeId to all step numbers (for nodes that appear multiple times)
@@ -262,34 +264,47 @@ export default function GraphCanvas(props: GraphCanvasProps) {
       </div>
 
       {/* Toolbar */}
-      <div className="absolute top-3 left-3 flex gap-2 z-10">
-        {isSidebarCollapsed && (
-          <button 
+      <div className="absolute top-3 left-3 right-3 flex justify-between z-10 pointer-events-none">
+        <div className="flex gap-2 pointer-events-auto">
+          {isSidebarCollapsed && (
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleSidebar();
+              }}
+              className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-bold tracking-widest hover:border-[#378ADD] hover:text-white transition-colors"
+            >
+              &gt;&gt;
+            </button>
+          )}
+          {[
+            { label: "fit view", action: fitView },
+            { label: "+ zoom", action: () => setScale((s) => Math.min(MAX_SCALE, s + SCALE_STEP)) },
+            { label: "– zoom", action: () => setScale((s) => Math.max(MIN_SCALE, s - SCALE_STEP)) },
+          ].map((btn, i) => (
+            <button 
+              key={i} 
+              onClick={(e) => {
+                e.stopPropagation();
+                btn.action();
+              }}
+              className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-medium hover:border-[#378ADD] hover:text-[#aaa] transition-colors"
+            >
+              {btn.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2 pointer-events-auto">
+          <button
             onClick={(e) => {
               e.stopPropagation();
-              toggleSidebar();
+              exportGraph();
             }}
-            className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-bold tracking-widest hover:border-[#378ADD] hover:text-white transition-colors"
+            className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-medium hover:border-[#378ADD] hover:text-[#aaa] transition-colors flex items-center gap-1.5"
           >
-            &gt;&gt;
+            Export JSON
           </button>
-        )}
-        {[
-          { label: "fit view", action: fitView },
-          { label: "+ zoom", action: () => setScale((s) => Math.min(MAX_SCALE, s + SCALE_STEP)) },
-          { label: "– zoom", action: () => setScale((s) => Math.max(MIN_SCALE, s - SCALE_STEP)) },
-        ].map((btn, i) => (
-          <button 
-            key={i} 
-            onClick={(e) => {
-              e.stopPropagation();
-              btn.action();
-            }}
-            className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-medium hover:border-[#378ADD] hover:text-[#aaa] transition-colors"
-          >
-            {btn.label}
-          </button>
-        ))}
+        </div>
       </div>
     </div>
   );
