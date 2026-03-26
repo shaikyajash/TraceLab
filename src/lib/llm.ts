@@ -12,7 +12,7 @@ interface LLMConfig {
 const PROVIDER_CONFIGS: Record<LLMProvider, { model: string }> = {
   claude: { model: 'claude-opus-4-6' },
   gemini: { model: 'gemini-flash-latest' },
-  openai: { model: 'gpt-4o' },
+  openai: { model: 'gpt-5.4-2026-03-05' },
 };
 
 // Gemini free tier: 2 req/min → enforce 31s minimum gap between calls
@@ -26,8 +26,33 @@ function withGeminiRateLimit<T>(fn: () => Promise<T>): Promise<T> {
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     lastGeminiCallAt = Date.now();
   });
-  // Run fn after the queue slot is acquired
   return geminiQueue.then(fn) as Promise<T>;
+}
+
+// OpenAI TPM serialisation — serialize all calls so we never overlap within the same minute
+
+// Parse "Please try again in 3.55s" from a 429 error message
+function parseRetryAfterMs(message: string): number {
+  const m = message.match(/try again in (\d+(?:\.\d+)?)s/i);
+  return m ? Math.ceil(parseFloat(m[1]) * 1000) + 500 : 62_000;
+}
+
+async function withOpenAIRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const is429 = msg.includes('429') || msg.toLowerCase().includes('rate limit');
+      if (is429 && attempt < maxRetries) {
+        const wait = parseRetryAfterMs(msg);
+        await new Promise((r) => setTimeout(r, wait));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('OpenAI retry limit exceeded');
 }
 
 // Runtime override — set by API routes per-request
@@ -80,14 +105,17 @@ export async function chat(opts: {
   temperature?: number;
 }): Promise<string> {
   const { provider, model } = getConfig();
-  // Reasoning models (o1/o3/o4 and gpt-5 family) consume tokens internally for chain-of-thought
-  const isReasoning = /^o\d/i.test(model) || /^gpt-5/i.test(model);
-  const { system, user, maxTokens = isReasoning ? 65536 : 16384, temperature = 0 } = opts;
+  // gpt-5 family: 128k max output tokens; reasoning models use tokens internally
+  const isGpt5 = /^gpt-5/i.test(model);
+  const isReasoning = /^o\d/i.test(model);
+  const defaultMaxTokens = isGpt5 ? 128_000 : isReasoning ? 65_536 : 16_384;
+  const { system, user, maxTokens = defaultMaxTokens, temperature = 0 } = opts;
 
   if (provider === 'claude') {
     return chatClaude({ model, system, user, maxTokens, temperature });
   } else if (provider === 'openai') {
-    return chatOpenAI({ model, system, user, maxTokens, temperature });
+    // Retry handles 429s; no queue needed — 500k TPM allows parallel requests
+    return withOpenAIRetry(() => chatOpenAI({ model, system, user, maxTokens, temperature }));
   } else {
     return withGeminiRateLimit(() => chatGemini({ model, system, user, maxTokens, temperature }));
   }

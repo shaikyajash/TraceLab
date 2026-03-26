@@ -1,12 +1,12 @@
 import { DiscoveredService } from './schema';
 import { type ResolvedExternalType, formatExternalTypesForPrompt } from './external-types';
 
-// ~4 chars per token. Leave room for system prompt (~3k tokens = 12k chars) and output.
-// OpenAI free tier: 30k TPM → cap source at 80k chars (~20k tokens)
+// ~4 chars per token.
+// gpt-5.4: 1M context, 128k output, 500k TPM → ~1.6M chars input (~400k tokens) per chunk
 // Gemini flash: 1M context → 400k chars is fine
 // Claude: 200k context → no cap needed
 export const SOURCE_CHAR_LIMITS: Record<string, number> = {
-  openai: 80_000,
+  openai: 1_600_000,
   gemini: 400_000,
   claude: Infinity,
 };
