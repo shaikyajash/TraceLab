@@ -10,6 +10,8 @@ import { Checkbox } from "@/components/ui/checkbox";
 interface LandingPageProps {
   githubUrl: string;
   setGithubUrl: (url: string) => void;
+  branch: string;
+  setBranch: (branch: string) => void;
   forceRescan: boolean;
   setForceRescan: (force: boolean) => void;
   isScanning: boolean;
@@ -32,6 +34,8 @@ export default function LandingPage(props: LandingPageProps) {
   const {
     githubUrl,
     setGithubUrl,
+    branch,
+    setBranch,
     forceRescan,
     setForceRescan,
     isScanning,
@@ -69,10 +73,17 @@ export default function LandingPage(props: LandingPageProps) {
                   type="text"
                   value={githubUrl}
                   onChange={(e) => setGithubUrl(e.target.value)}
-                  placeholder="https://github.com/username/repository"
+                  placeholder="Paste git clone command or repository URL"
                   disabled={isScanning}
                   className="bg-[#0a0a0c] border-[#2a2a2e] text-[#ddd] placeholder:text-[#444] focus:border-[#378ADD] focus:ring-[#378ADD]"
                 />
+                
+                {branch && (
+                  <div className="text-xs text-[#888] flex items-center gap-2">
+                    <span className="text-[#378ADD]">Branch:</span>
+                    <span className="font-mono">{branch}</span>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-2.5">
@@ -81,7 +92,7 @@ export default function LandingPage(props: LandingPageProps) {
                       checked={forceRescan}
                       onCheckedChange={(checked: boolean) => setForceRescan(checked)}
                       disabled={isScanning}
-                      className=" bg-white data-[state=checked]:bg-[#378ADD] data-[state=checked]:border-[#378ADD]"
+                      className=" bg-gray-800 data-[state=checked]:bg-[#378ADD] data-[state=checked]:border-[#378ADD]"
                     />
                     <Label
                       htmlFor="force-rescan"
