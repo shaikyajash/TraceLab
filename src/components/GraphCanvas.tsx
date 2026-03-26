@@ -1,6 +1,6 @@
 "use client";
 
-import type { ComponentNode, PayloadEdge } from "@/types";
+import type { ComponentNode, PayloadEdge, TraceStep } from "@/types";
 import { NODE_W, NODE_H, KIND_COLORS, KIND_LABELS, CANVAS_WIDTH, CANVAS_HEIGHT, MIN_SCALE, MAX_SCALE, SCALE_STEP } from "@/constants";
 
 interface GraphCanvasProps {
@@ -14,6 +14,10 @@ interface GraphCanvasProps {
   selectedId: string | null;
   activeTraceIds: Set<string>;
   traceHeadId: string | null;
+  traceSteps: TraceStep[];
+  traceVisible: number;
+  isSidebarCollapsed: boolean;
+  toggleSidebar: () => void;
   setSelectedId: (id: string | null) => void;
   handleCanvasMouseDown: (e: React.MouseEvent) => void;
   handleCanvasMouseMove: (e: React.MouseEvent) => void;
@@ -42,6 +46,10 @@ export default function GraphCanvas(props: GraphCanvasProps) {
     selectedId,
     activeTraceIds,
     traceHeadId,
+    traceSteps,
+    traceVisible,
+    isSidebarCollapsed,
+    toggleSidebar,
     setSelectedId,
     handleCanvasMouseDown,
     handleCanvasMouseMove,
@@ -51,6 +59,14 @@ export default function GraphCanvas(props: GraphCanvasProps) {
     fitView,
     setScale,
   } = props;
+
+  // Create a map of nodeId to all step numbers (for nodes that appear multiple times)
+  // Only include steps that have been revealed (up to traceVisible)
+  const nodeStepMap = new Map<string, number[]>();
+  traceSteps.slice(0, traceVisible).forEach((step, index) => {
+    const existing = nodeStepMap.get(step.nodeId) || [];
+    nodeStepMap.set(step.nodeId, [...existing, index + 1]);
+  });
 
   const traceEdgeSet = new Set<string>();
   if (activeTraceIds.size > 0) {
@@ -82,8 +98,10 @@ export default function GraphCanvas(props: GraphCanvasProps) {
           position: "absolute",
           top: 0,
           left: 0,
-          transform: `translate(${tx}px, ${ty}px) scale(${scale})`,
+          transform: `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`,
           transformOrigin: "0 0",
+          transition: isPanning ? "none" : "transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
+          willChange: isPanning ? "transform" : "auto",
         }}
       >
         {/* SVG edges */}
@@ -144,6 +162,7 @@ export default function GraphCanvas(props: GraphCanvasProps) {
           const isTraceActive = activeTraceIds.has(node.id);
           const isHead = traceHeadId === node.id;
           const isGreyedOut = activeTraceIds.size > 0 && !isTraceActive;
+          const stepNumbers = nodeStepMap.get(node.id) || [];
 
           return (
             <div
@@ -153,9 +172,13 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 e.stopPropagation(); 
                 if (!isGreyedOut) {
                   setSelectedId(node.id);
+                  // Auto-open sidebar when clicking a node
+                  if (isSidebarCollapsed) {
+                    toggleSidebar();
+                  }
                 }
               }}
-              className="absolute transition-all duration-200 overflow-hidden"
+              className="absolute transition-all duration-200"
               style={{
                 left: pos.x,
                 top: pos.y,
@@ -172,8 +195,26 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 borderRadius: 10,
                 opacity: isGreyedOut ? 0.25 : 1,
                 cursor: isGreyedOut ? "not-allowed" : "pointer",
+                overflow: "visible",
               }}
             >
+              {/* Step number badges - positioned at top left, multiple if node appears multiple times */}
+              {stepNumbers.length > 0 && (
+                <div className="absolute -top-2 -left-2 flex gap-1 z-10">
+                  {stepNumbers.map((num, idx) => (
+                    <div 
+                      key={idx}
+                      className="w-6 h-6 rounded-full bg-[#378ADD] flex items-center justify-center text-[10px] font-bold text-white border-2 border-[#0d0d0f]"
+                      style={{
+                        boxShadow: "0 2px 8px rgba(55, 138, 221, 0.4)"
+                      }}
+                    >
+                      {num}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Top colored strip */}
               <div 
                 className="h-1 w-full"
@@ -181,7 +222,7 @@ export default function GraphCanvas(props: GraphCanvasProps) {
               />
 
               {/* Content */}
-              <div className="p-3">
+              <div className="p-3 overflow-hidden">
                 {/* Badges row */}
                 <div className="flex items-center gap-1.5 mb-2.5">
                   <div 
@@ -222,6 +263,17 @@ export default function GraphCanvas(props: GraphCanvasProps) {
 
       {/* Toolbar */}
       <div className="absolute top-3 left-3 flex gap-2 z-10">
+        {isSidebarCollapsed && (
+          <button 
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleSidebar();
+            }}
+            className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-bold tracking-widest hover:border-[#378ADD] hover:text-white transition-colors"
+          >
+            &gt;&gt;
+          </button>
+        )}
         {[
           { label: "fit view", action: fitView },
           { label: "+ zoom", action: () => setScale((s) => Math.min(MAX_SCALE, s + SCALE_STEP)) },
@@ -229,7 +281,10 @@ export default function GraphCanvas(props: GraphCanvasProps) {
         ].map((btn, i) => (
           <button 
             key={i} 
-            onClick={btn.action}
+            onClick={(e) => {
+              e.stopPropagation();
+              btn.action();
+            }}
             className="bg-[#111114] border border-[#2a2a2e] rounded-md px-3 py-2 text-[#888] text-[10px] cursor-pointer font-medium hover:border-[#378ADD] hover:text-[#aaa] transition-colors"
           >
             {btn.label}

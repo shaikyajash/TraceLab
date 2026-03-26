@@ -34,16 +34,7 @@ export default function TraceFlow({ traceSteps, traceVisible, isTracing, clearTr
             </span>
           </div>
           <div className="flex items-center gap-1">
-            {!isTracing && (
-              <Button
-                onClick={(e) => { e.stopPropagation(); clearTrace(); }}
-                variant="ghost"
-                size="sm"
-                className="h-5 px-1.5 text-[8px] text-[#555] hover:text-[#ddd] hover:bg-[#1a1a1c]"
-              >
-                Clear
-              </Button>
-            )}
+         
             <svg 
               className={`w-3 h-3 text-[#555] transition-transform ${isCollapsed ? '' : 'rotate-180'}`} 
               fill="none" 

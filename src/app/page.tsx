@@ -220,6 +220,7 @@ export default function Home() {
   /* sidebar resize */
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const resizeStart = useRef({ x: 0, w: DEFAULT_SIDEBAR_WIDTH });
 
   /* simulation tracing */
@@ -234,22 +235,35 @@ export default function Home() {
   /* request builder */
   const [pathParams, setPathParams] = useState<Record<string, string>>({});
   const [reqBody, setReqBody] = useState("{\n  \n}");
-  const [activeReqTab, setActiveReqTab] = useState<"params" | "body">("params");
-
-  /* sidebar main tab */
-  const [mainTab, setMainTab] = useState<"request" | "trace">("request");
 
   /* graph transition */
   const [isGraphLoaded, setIsGraphLoaded] = useState(false);
+  const [isGraphUnloading, setIsGraphUnloading] = useState(false);
 
   /* trigger transition when graph changes */
   useEffect(() => {
     if (graph) {
       setIsGraphLoaded(false);
+      setIsGraphUnloading(false);
       const timer = setTimeout(() => setIsGraphLoaded(true), 50);
       return () => clearTimeout(timer);
     }
   }, [graph]);
+
+  /* adjust canvas position when sidebar is toggled */
+  const prevCollapsedRef = useRef(isSidebarCollapsed);
+  useEffect(() => {
+    if (graph && prevCollapsedRef.current !== isSidebarCollapsed) {
+      // When sidebar closes, shift canvas right to recenter
+      // When sidebar opens, shift canvas left to recenter
+      const offset = isSidebarCollapsed ? sidebarWidth / 2 : -sidebarWidth / 2;
+      // Use requestAnimationFrame for smoother transition
+      requestAnimationFrame(() => {
+        setTx(prev => prev + offset);
+      });
+      prevCollapsedRef.current = isSidebarCollapsed;
+    }
+  }, [isSidebarCollapsed, graph, sidebarWidth]);
 
   /* filtered core nodes + edges */
   const coreNodes = useMemo(() => {
@@ -303,10 +317,6 @@ export default function Home() {
         setReqBody(JSON.stringify(JSON.parse(node.example_payload), null, 2));
       } catch {
         setReqBody(node.example_payload);
-      }
-      const m = (node.method || "GET").toUpperCase();
-      if (m !== "GET" && m !== "HEAD") {
-        setActiveReqTab("body");
       }
     } else {
       setReqBody("{\n  \n}");
@@ -457,8 +467,11 @@ export default function Home() {
   const handleCanvasMouseMove = useCallback(
     (e: React.MouseEvent) => {
       if (!isPanning) return;
-      setTx(panStart.current.tx + (e.clientX - panStart.current.x));
-      setTy(panStart.current.ty + (e.clientY - panStart.current.y));
+      // Use direct state update for smoother panning
+      const newTx = panStart.current.tx + (e.clientX - panStart.current.x);
+      const newTy = panStart.current.ty + (e.clientY - panStart.current.y);
+      setTx(newTx);
+      setTy(newTy);
     },
     [isPanning]
   );
@@ -471,9 +484,11 @@ export default function Home() {
 
   const fitView = useCallback(() => {
     setScale(DEFAULT_SCALE);
-    setTx(DEFAULT_TX);
+    // Adjust center position based on sidebar state
+    const offset = isSidebarCollapsed ? sidebarWidth / 2 : 0;
+    setTx(DEFAULT_TX + offset);
     setTy(DEFAULT_TY);
-  }, []);
+  }, [isSidebarCollapsed, sidebarWidth]);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
     if (!(e.target as HTMLElement).closest("[data-node]")) setSelectedId(null);
@@ -609,54 +624,81 @@ export default function Home() {
           0% { opacity: 0; filter: blur(8px); transform: scale(0.98); }
           100% { opacity: 1; filter: blur(0px); transform: scale(1); }
         }
+        @keyframes fadeOutBlur {
+          0% { opacity: 1; filter: blur(0px); transform: scale(1); }
+          100% { opacity: 0; filter: blur(8px); transform: scale(0.98); }
+        }
+        @keyframes slideInFromLeft {
+          0% { transform: translateX(-100%); opacity: 0; }
+          100% { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes fadeInSlide {
+          0% { opacity: 0; transform: translateY(8px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
       `}</style>
 
       <div 
         className="flex w-full h-full"
         style={{
-          animation: isGraphLoaded ? "fadeInBlur 0.6s ease-out" : "none",
-          opacity: isGraphLoaded ? 1 : 0,
-          filter: isGraphLoaded ? "blur(0px)" : "blur(8px)",
+          animation: isGraphUnloading 
+            ? "fadeOutBlur 0.4s ease-out" 
+            : isGraphLoaded 
+              ? "fadeInBlur 0.6s ease-out" 
+              : "none",
+          opacity: isGraphUnloading ? 0 : isGraphLoaded ? 1 : 0,
+          filter: isGraphUnloading ? "blur(8px)" : isGraphLoaded ? "blur(0px)" : "blur(8px)",
         }}
       >
 
-      <Sidebar
-        width={sidebarWidth}
-        routes={routes}
-        traceMethod={traceMethod}
-        traceRouteId={traceRouteId}
-        setTraceRouteId={setTraceRouteId}
-        setTraceMethod={setTraceMethod}
-        clearTrace={clearTrace}
-        setSelectedId={setSelectedId}
-        routePathParams={routePathParams}
-        pathParams={pathParams}
-        setPathParams={setPathParams}
-        reqBody={reqBody}
-        setReqBody={setReqBody}
-        activeReqTab={activeReqTab}
-        setActiveReqTab={setActiveReqTab}
-        runSimulation={runSimulation}
-        isTracing={isTracing}
-        traceSteps={traceSteps}
-        traceVisible={traceVisible}
-        selectedNode={selectedNode}
-        coreEdges={coreEdges}
-        nodeById={nodeById}
-        setGraph={setGraph}
-        setError={setError}
-        mainTab={mainTab}
-        setMainTab={setMainTab}
-      />
+      <div 
+        className="h-full flex overflow-hidden"
+        style={{
+          width: isSidebarCollapsed ? 0 : sidebarWidth,
+          transition: "width 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          opacity: isSidebarCollapsed ? 0 : 1,
+        }}
+      >
+        {!isSidebarCollapsed && (
+          <Sidebar
+            width={sidebarWidth}
+            routes={routes}
+            traceMethod={traceMethod}
+            traceRouteId={traceRouteId}
+            setTraceRouteId={setTraceRouteId}
+            setTraceMethod={setTraceMethod}
+            clearTrace={clearTrace}
+            setSelectedId={setSelectedId}
+            routePathParams={routePathParams}
+            pathParams={pathParams}
+            setPathParams={setPathParams}
+            reqBody={reqBody}
+            setReqBody={setReqBody}
+            runSimulation={runSimulation}
+            isTracing={isTracing}
+            traceSteps={traceSteps}
+            traceVisible={traceVisible}
+            selectedNode={selectedNode}
+            coreEdges={coreEdges}
+            nodeById={nodeById}
+            setGraph={setGraph}
+            setError={setError}
+            setIsGraphUnloading={setIsGraphUnloading}
+            toggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          />
+        )}
+      </div>
 
       {/* Resize handle */}
-      <div
-        onMouseDown={handleResizeStart}
-        className="w-1 cursor-col-resize transition-colors duration-150 z-20 shrink-0"
-        style={{ background: isResizing ? "#378ADD" : "transparent" }}
-        onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "#333"; }}
-        onMouseLeave={(e) => { if (!isResizing) (e.target as HTMLElement).style.background = "transparent"; }}
-      />
+      {!isSidebarCollapsed && (
+        <div
+          onMouseDown={handleResizeStart}
+          className="w-1 cursor-col-resize transition-colors duration-150 z-20 shrink-0 h-full"
+          style={{ background: isResizing ? "#378ADD" : "transparent" }}
+          onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "#333"; }}
+          onMouseLeave={(e) => { if (!isResizing) (e.target as HTMLElement).style.background = "transparent"; }}
+        />
+      )}
 
       <GraphCanvas
         coreNodes={coreNodes}
@@ -669,9 +711,12 @@ export default function Home() {
         selectedId={selectedId}
         activeTraceIds={activeTraceIds}
         traceHeadId={traceHeadId}
+        traceSteps={traceSteps}
+        traceVisible={traceVisible}
+        isSidebarCollapsed={isSidebarCollapsed}
+        toggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         setSelectedId={(id) => {
           setSelectedId(id);
-          if (id) setMainTab("request");
         }}
         handleCanvasMouseDown={handleCanvasMouseDown}
         handleCanvasMouseMove={handleCanvasMouseMove}

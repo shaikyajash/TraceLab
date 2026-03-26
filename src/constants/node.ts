@@ -56,6 +56,7 @@ export const KIND_COLORS: Record<string, NodeColors> = {
     badgeBg: "#9FE1CB", 
     badgeText: "#085041" 
   },
+
 };
 
 // Node kind labels
