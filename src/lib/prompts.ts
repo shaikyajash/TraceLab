@@ -305,7 +305,10 @@ FORMAT:
 Rules:
   - Same condition ops as trace match: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field, eq_type
   - First case whose match passes wins. match: [] = unconditional catch-all. Put it LAST.
-  - output value must be a JSON object, array, string, number, boolean, or null — never a string-escaped JSON.
+  - output value must be a PARSED JSON value (object, array, string, number, boolean, null).
+    NEVER embed JSON as an escaped string like "{\"key\":\"val\"}". Use actual objects: {"key":"val"}.
+    WRONG: "data": "{\"orders\":[{\"id\":\"1\"}]}"   ← string containing escaped JSON
+    RIGHT: "data": {"orders": [{"id": "1"}]}          ← actual parsed JSON object
   - Keep output values realistic: use the node's actual return type fields, not placeholder strings.
   - Success output_cases MUST carry forward enough fields for downstream nodes to evaluate
     THEIR conditions. If business_logic needs to check "authorized", then middleware's success

@@ -821,11 +821,14 @@ export default function Home() {
 
       // ── Step N > 0: intermediate payload edit ──
       // Keep current trace path, recompute from stepIndex. Stops if a node terminates.
-      setTraceSteps((prev) => {
-        const newSteps = recompute(prev, stepIndex, newInput);
-        setTraceVisible(newSteps.length);
-        return newSteps;
-      });
+      setTraceSteps((prev) => recompute(prev, stepIndex, newInput));
+      // Update visible count after state settles
+      setTimeout(() => {
+        setTraceSteps((current) => {
+          setTraceVisible(current.length);
+          return current;
+        });
+      }, 0);
     },
     [graph, traceRouteId, nodeMap],
   );

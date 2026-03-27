@@ -17,25 +17,42 @@ export interface ResolvedOutput {
  * Only overlapping top-level keys are replaced. Nested objects are merged recursively.
  * Array values from the template are kept as-is (structure comes from the template).
  */
-function mergeInputIntoOutput(template: unknown, input: unknown): unknown {
-  if (
-    typeof template !== 'object' ||
-    template === null ||
-    typeof input !== 'object' ||
-    input === null ||
-    Array.isArray(template) ||
-    Array.isArray(input)
-  ) {
-    return template;
+/** Try to parse stringified JSON, return as-is if not JSON */
+function tryParseJson(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const t = value.trim();
+  if (t.startsWith('{') || t.startsWith('[')) {
+    try {
+      return JSON.parse(t);
+    } catch {
+      /* not JSON */
+    }
   }
-  const tpl = template as Record<string, unknown>;
-  const inp = input as Record<string, unknown>;
-  const result: Record<string, unknown> = { ...tpl };
+  return value;
+}
 
-  for (const key of Object.keys(tpl)) {
-    if (!(key in inp)) continue;
-    const tVal = tpl[key];
-    const iVal = inp[key];
+function mergeInputIntoOutput(template: unknown, input: unknown): unknown {
+  const tpl = tryParseJson(template);
+  const inp = tryParseJson(input);
+
+  if (
+    typeof tpl !== 'object' ||
+    tpl === null ||
+    typeof inp !== 'object' ||
+    inp === null ||
+    Array.isArray(tpl) ||
+    Array.isArray(inp)
+  ) {
+    return tpl;
+  }
+  const tplObj = tpl as Record<string, unknown>;
+  const inpObj = inp as Record<string, unknown>;
+  const result: Record<string, unknown> = { ...tplObj };
+
+  for (const key of Object.keys(tplObj)) {
+    if (!(key in inpObj)) continue;
+    const tVal = tryParseJson(tplObj[key]);
+    const iVal = tryParseJson(inpObj[key]);
 
     if (
       typeof tVal === 'object' &&
@@ -56,13 +73,39 @@ function mergeInputIntoOutput(template: unknown, input: unknown): unknown {
 
 // ─── Input schema validation ────────────────────────────────────────
 
-/** Navigate a dot-notation + bracket path to get a nested value */
+/** Navigate a dot-notation + bracket path to get a nested value.
+ *  Auto-parses stringified JSON encountered along the path —
+ *  handles LLM outputs that embed objects as escaped strings. */
 function getFieldValue(payload: unknown, field: string): unknown {
   const parts = field.replace(/\[(\d+)\]/g, '.$1').split('.');
   let current: unknown = payload;
   for (const part of parts) {
+    // Auto-parse stringified JSON encountered along the path
+    if (typeof current === 'string') {
+      const t = current.trim();
+      if (t.startsWith('{') || t.startsWith('[')) {
+        try {
+          current = JSON.parse(t);
+        } catch {
+          return undefined;
+        }
+      } else {
+        return undefined;
+      }
+    }
     if (current === null || current === undefined || typeof current !== 'object') return undefined;
     current = (current as Record<string, unknown>)[part];
+  }
+  // Final value: also try to parse if it's stringified JSON
+  if (typeof current === 'string') {
+    const t = current.trim();
+    if (t.startsWith('{') || t.startsWith('[')) {
+      try {
+        return JSON.parse(t);
+      } catch {
+        /* return as string */
+      }
+    }
   }
   return current;
 }

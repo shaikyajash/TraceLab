@@ -185,7 +185,12 @@ export default function Sidebar(props: SidebarProps) {
   // Expand Inspector and scroll when a node is selected
   useEffect(() => {
     if (selectedNode && !isTracing) {
-      setInspectorOpen(true);
+      // Only open inspector if user manually clicked (check if expandedStep was set by user click)
+      const wasManualClick = expandedStep !== null;
+
+      if (wasManualClick) {
+        setInspectorOpen(true);
+      }
 
       // Scroll to inspector or error
       setTimeout(() => {
@@ -551,56 +556,57 @@ export default function Sidebar(props: SidebarProps) {
                       <Field label="DESCRIPTION">{selectedNode.description}</Field>
                     )}
 
-                    {/* Always show input editor for any selected node */}
-                    <div>
-                      <Field label="INPUT (CUSTOM)">
-                        <textarea
-                          value={
-                            (stepInputEdits as Record<string, string>)[selectedNode.id] ??
-                            (expandedStep !== null && traceSteps[expandedStep]?.inputPayload
-                              ? JSON.stringify(traceSteps[expandedStep].inputPayload, null, 2)
-                              : '{}')
-                          }
-                          onChange={(e) => {
-                            setStepInputEdits((prev) => ({
-                              ...prev,
-                              [selectedNode.id]: e.target.value,
-                            }));
-                          }}
-                          placeholder="Enter custom input JSON for this node..."
-                          spellCheck={false}
-                          className="w-full min-h-[100px] bg-[#0d0d0f] border-[0.5px] border-[#2a2a2e] rounded px-2.5 py-2 text-[10px] text-[#ccc] font-mono outline-none resize-y leading-relaxed box-border mt-1"
-                        />
-                      </Field>
-                      {(stepInputEdits as Record<string, string>)[selectedNode.id] && (
-                        <Button
-                          onClick={() => {
-                            try {
-                              const parsed = JSON.parse((stepInputEdits as Record<string, string>)[selectedNode.id]);
-                              // If we have a step index, use rerunFromStep
-                              if (expandedStep !== null) {
-                                rerunFromStep(expandedStep, selectedNode.id, parsed);
+                    {/* Input editor — keyed by step index so each step is independently editable */}
+                    {expandedStep !== null && (
+                      <div>
+                        <Field label="INPUT">
+                          <textarea
+                            value={
+                              stepInputEdits[expandedStep] ??
+                              (traceSteps[expandedStep]?.inputPayload != null
+                                ? JSON.stringify(traceSteps[expandedStep].inputPayload, null, 2)
+                                : '{}')
+                            }
+                            onChange={(e) => {
+                              setStepInputEdits((prev) => ({
+                                ...prev,
+                                [expandedStep]: e.target.value,
+                              }));
+                            }}
+                            placeholder="Edit input JSON and click Run to recompute..."
+                            spellCheck={false}
+                            className="w-full min-h-[100px] bg-[#0d0d0f] border-[0.5px] border-[#2a2a2e] rounded px-2.5 py-2 text-[10px] text-[#ccc] font-mono outline-none resize-y leading-relaxed box-border mt-1"
+                          />
+                        </Field>
+                        {stepInputEdits[expandedStep] != null && (
+                          <Button
+                            onClick={() => {
+                              try {
+                                const parsed = JSON.parse(stepInputEdits[expandedStep]);
+                                rerunFromStep(
+                                  expandedStep,
+                                  traceSteps[expandedStep].nodeId,
+                                  parsed,
+                                );
+                                // Clear edits for this step and all later steps
                                 setStepInputEdits((prev) => {
                                   const n = { ...prev };
-                                  Object.keys(n).forEach((k) => {
+                                  for (const k of Object.keys(n)) {
                                     if (Number(k) >= expandedStep) delete n[Number(k)];
-                                  });
+                                  }
                                   return n;
                                 });
+                              } catch {
+                                /* invalid JSON */
                               }
-                              // Otherwise just save it for when simulation runs
-                            } catch {
-                              /* invalid JSON */
-                            }
-                          }}
-                          className="w-full bg-[#378ADD] hover:bg-[#4a9bef] text-white text-[10px] font-semibold mt-2"
-                        >
-                          {expandedStep !== null
-                            ? `Run from step ${expandedStep + 1}`
-                            : 'Save custom input'}
-                        </Button>
-                      )}
-                    </div>
+                            }}
+                            className="w-full bg-[#378ADD] hover:bg-[#4a9bef] text-white text-[10px] font-semibold mt-2"
+                          >
+                            Run from step {expandedStep + 1}
+                          </Button>
+                        )}
+                      </div>
+                    )}
 
                     {/* Show step I/O if we have an expanded step with actual runtime data */}
                     {expandedStep !== null && traceSteps[expandedStep] && (
@@ -613,7 +619,10 @@ export default function Sidebar(props: SidebarProps) {
                           </Field>
                         )}
                         {traceSteps[expandedStep].terminated && (
-                          <div ref={errorRef} className="flex items-center gap-2 bg-[#2e1a0a] border border-[#633806] rounded px-2.5 py-1.5">
+                          <div
+                            ref={errorRef}
+                            className="flex items-center gap-2 bg-[#2e1a0a] border border-[#633806] rounded px-2.5 py-1.5"
+                          >
                             <span className="text-[10px] font-bold text-[#ef9f27]">
                               CHAIN STOPPED
                             </span>
@@ -732,8 +741,8 @@ export default function Sidebar(props: SidebarProps) {
                             <div
                               className="bg-[#111114] rounded-lg p-2.5 transition-all hover:bg-[#0d0d0f] hover:shadow-lg cursor-pointer"
                               style={{
-                                border: step.terminated 
-                                  ? `1px solid #ef9f27` 
+                                border: step.terminated
+                                  ? `1px solid #ef9f27`
                                   : `1px solid ${colors.border}40`,
                               }}
                               onClick={() => {

@@ -123,7 +123,9 @@ export default function TraceFlow({
                           >
                             {KIND_LABELS[step.kind] || step.kind}
                           </div>
-                          <span className="text-xs text-[#ddd] font-semibold flex-1">{step.name}</span>
+                          <span className="text-xs text-[#ddd] font-semibold flex-1">
+                            {step.name}
+                          </span>
                         </div>
                         {step.description && !step.description.includes('CHAIN STOP') && (
                           <div className="text-[11px] text-[#888] leading-relaxed">

@@ -1,16 +1,44 @@
 import { StepCondition } from './schema';
 
-function getField(payload: unknown, field: string): unknown {
+function getField(payload: unknown, field: string | undefined): unknown {
+  if (!field) return undefined;
   const parts = field.replace(/\[(\d+)\]/g, '.$1').split('.');
   let current: unknown = payload;
   for (const part of parts) {
+    // Auto-parse stringified JSON along the path
+    if (typeof current === 'string') {
+      const t = current.trim();
+      if (t.startsWith('{') || t.startsWith('[')) {
+        try {
+          current = JSON.parse(t);
+        } catch {
+          return undefined;
+        }
+      } else {
+        return undefined;
+      }
+    }
     if (current === null || current === undefined || typeof current !== 'object') return undefined;
     current = (current as Record<string, unknown>)[part];
+  }
+  if (typeof current === 'string') {
+    const t = current.trim();
+    if (t.startsWith('{') || t.startsWith('[')) {
+      try {
+        return JSON.parse(t);
+      } catch {
+        /* return as string */
+      }
+    }
   }
   return current;
 }
 
-export function evaluateCondition(cond: StepCondition, payload: unknown): boolean {
+export function evaluateCondition(
+  cond: StepCondition | undefined | null,
+  payload: unknown,
+): boolean {
+  if (!cond || !cond.field || !cond.op) return true;
   const fieldValue = getField(payload, cond.field);
   switch (cond.op) {
     case 'eq':

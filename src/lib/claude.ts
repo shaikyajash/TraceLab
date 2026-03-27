@@ -36,19 +36,92 @@ function parseResult(jsonStr: string): PerServiceResult {
   };
 }
 
-function buildRepairPrompt(result: PerServiceResult, repairInstructions: string): string {
-  return `The following JSON analysis has validation errors. Fix ALL of them and return the corrected FULL JSON.
+// buildRepairPrompt is now inlined in runValidatedCall
 
-ERRORS TO FIX:
-${repairInstructions}
+// ─── Generic validated LLM call: parse → validate → retry ───────────
 
-CURRENT JSON:
-${JSON.stringify(result, null, 2)}`;
+interface ValidatedCallOptions {
+  system: string;
+  user: string;
+  label: string;
+  maxRetries?: number;
+  /** Parse raw JSON string into typed result. Throw if malformed. */
+  parse: (jsonStr: string) => unknown;
+  /** Validate parsed result. Return error strings or empty array if valid. */
+  validate: (parsed: unknown) => string[];
+  onProgress?: (msg: string) => void;
 }
 
-// mergePartialResults moved to artifacts.ts as aggregateStructure()
+/**
+ * Runs an LLM call with per-chunk validation and retry:
+ * 1. Call LLM
+ * 2. Parse JSON (retry with JSON-fix prompt if malformed)
+ * 3. Validate against schema (retry with repair prompt if invalid)
+ * 4. Only return after validation passes or retries exhausted
+ */
+async function runValidatedCall<T>(opts: ValidatedCallOptions): Promise<T> {
+  const { system, user, label, maxRetries = 2, parse, validate, onProgress } = opts;
 
-// ─── Single-chunk LLM call + parse + repair ──────────────────────────
+  // Step 1: LLM call
+  let jsonStr: string;
+  try {
+    jsonStr = await chat({ system, user });
+  } catch (err) {
+    throw new Error(
+      `LLM call failed for ${label}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
+  // Step 2: Parse (with JSON-fix retry)
+  let result: unknown;
+  try {
+    result = parse(jsonStr);
+  } catch {
+    onProgress?.(`  ${label}: malformed JSON, attempting fix...`);
+    try {
+      const fixed = await chat({
+        system: 'Fix the following invalid JSON. Return ONLY valid JSON, nothing else.',
+        user: jsonStr,
+      });
+      result = parse(fixed);
+    } catch (fixErr) {
+      throw new Error(
+        `${label}: JSON parse failed after fix attempt: ${fixErr instanceof Error ? fixErr.message : String(fixErr)}`,
+      );
+    }
+  }
+
+  // Step 3: Validate + repair loop
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const errors = validate(result);
+    if (errors.length === 0) break; // valid
+
+    if (attempt === maxRetries) {
+      onProgress?.(
+        `  ${label}: ${errors.length} validation error(s) remain after ${maxRetries} retries`,
+      );
+      break;
+    }
+
+    onProgress?.(
+      `  ${label}: ${errors.length} error(s), repairing (attempt ${attempt + 1}/${maxRetries})...`,
+    );
+    try {
+      const repairStr = await chat({
+        system:
+          'You are fixing a JSON output that has validation errors. Return ONLY the corrected full JSON. No prose, no markdown fences.',
+        user: `ERRORS TO FIX:\n${errors.join('\n')}\n\nCURRENT JSON:\n${JSON.stringify(result, null, 2)}`,
+      });
+      result = parse(repairStr);
+    } catch {
+      break;
+    }
+  }
+
+  return result as T;
+}
+
+// ─── Phase 1: Structure extraction call ─────────────────────────────
 
 async function runAnalysisCall(
   service: DiscoveredService,
@@ -59,46 +132,94 @@ async function runAnalysisCall(
 ): Promise<PerServiceResult> {
   const { system, user } = buildPerServicePrompt(service, externalTypes, chunkInfo);
 
-  let jsonStr: string;
-  try {
-    jsonStr = await chat({ system, user });
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    throw new Error(`LLM call failed for ${label}: ${reason}`);
+  return runValidatedCall<PerServiceResult>({
+    system,
+    user,
+    label,
+    maxRetries: options?.maxRepairAttempts ?? 2,
+    parse: (jsonStr) => parseResult(jsonStr),
+    validate: (parsed) => {
+      const v = validatePerServiceResult(parsed as PerServiceResult, externalTypes);
+      return v.errors
+        .filter((e) => e.severity === 'error')
+        .map((e) => `[${e.category}] ${e.message}`);
+    },
+    onProgress: options?.onProgress,
+  });
+}
+
+// ─── Phase 2/3 validators ───────────────────────────────────────────
+
+interface OutputCasesResult {
+  output_cases?: Record<string, unknown[]>;
+  input_schemas?: Record<string, unknown[]>;
+}
+
+function validateOutputCasesResult(parsed: unknown): string[] {
+  const errors: string[] = [];
+  if (typeof parsed !== 'object' || parsed === null) {
+    errors.push('Response is not a JSON object');
+    return errors;
   }
-
-  let result: PerServiceResult;
-  try {
-    result = parseResult(jsonStr);
-  } catch {
-    const fixed = await chat({
-      system: 'Fix the following invalid JSON. Return ONLY valid JSON, nothing else.',
-      user: jsonStr,
-    });
-    result = parseResult(fixed);
-  }
-
-  const maxAttempts = options?.maxRepairAttempts ?? 3;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const validation = validatePerServiceResult(result, externalTypes);
-    if (validation.valid) break;
-
-    options?.onProgress?.(
-      `Validation found ${validation.errors.length} error(s) in ${label}, repairing (attempt ${attempt + 1}/${maxAttempts})...`,
-    );
-    try {
-      const repairStr = await chat({
-        system:
-          'You are fixing a JSON analysis that has validation errors. Return ONLY the corrected full JSON. No prose, no markdown fences.',
-        user: buildRepairPrompt(result, validation.repairInstructions),
-      });
-      result = parseResult(repairStr);
-    } catch {
-      break;
+  const obj = parsed as Record<string, unknown>;
+  if (!obj.output_cases || typeof obj.output_cases !== 'object') {
+    errors.push('Missing "output_cases" object in response');
+  } else {
+    const oc = obj.output_cases as Record<string, unknown>;
+    for (const [nodeId, cases] of Object.entries(oc)) {
+      if (!Array.isArray(cases)) {
+        errors.push(`output_cases["${nodeId}"] is not an array`);
+        continue;
+      }
+      for (let i = 0; i < cases.length; i++) {
+        const c = cases[i] as Record<string, unknown>;
+        if (c.output === undefined) {
+          errors.push(`output_cases["${nodeId}"][${i}] missing "output" field`);
+        }
+        if (c.match !== undefined && !Array.isArray(c.match)) {
+          errors.push(`output_cases["${nodeId}"][${i}] "match" must be an array`);
+        }
+        if (c.terminates !== undefined && typeof c.terminates !== 'boolean') {
+          errors.push(`output_cases["${nodeId}"][${i}] "terminates" must be boolean`);
+        }
+      }
     }
   }
+  return errors;
+}
 
-  return result;
+interface TracesResult {
+  traces?: unknown[];
+}
+
+function validateTracesResult(parsed: unknown): string[] {
+  const errors: string[] = [];
+  if (typeof parsed !== 'object' || parsed === null) {
+    errors.push('Response is not a JSON object');
+    return errors;
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (!obj.traces || !Array.isArray(obj.traces)) {
+    errors.push('Missing "traces" array in response');
+    return errors;
+  }
+  for (let i = 0; i < obj.traces.length; i++) {
+    const t = obj.traces[i] as Record<string, unknown>;
+    if (!t.route_id || typeof t.route_id !== 'string') {
+      errors.push(`traces[${i}] missing or invalid "route_id"`);
+    }
+    if (!t.steps || !Array.isArray(t.steps)) {
+      errors.push(`traces[${i}] missing or invalid "steps" array`);
+    } else {
+      for (let s = 0; s < (t.steps as unknown[]).length; s++) {
+        const step = (t.steps as Record<string, unknown>[])[s];
+        if (!step.node_id || typeof step.node_id !== 'string') {
+          errors.push(`traces[${i}].steps[${s}] missing "node_id"`);
+        }
+      }
+    }
+  }
+  return errors;
 }
 
 // ─── Concurrency helper ─────────────────────────────────────────────
@@ -322,8 +443,16 @@ export async function analyzeService(
           })),
           sgEdges,
         );
-        const jsonStr = await chat({ system, user });
-        const parsed = JSON.parse(jsonStr);
+
+        const parsed = await runValidatedCall<OutputCasesResult>({
+          system,
+          user,
+          label: `output_cases:${entryNode?.name || sg.entryId}`,
+          maxRetries: 2,
+          parse: (str) => JSON.parse(str),
+          validate: (p) => validateOutputCasesResult(p),
+          onProgress: options?.onProgress,
+        });
 
         await writeArtifact(slug, 'output_cases', sg.entryId, parsed);
         options?.onProgress?.(`  ${entryNode?.name || sg.entryId} → artifact saved`);
@@ -374,8 +503,16 @@ export async function analyzeService(
           sgNodes.map((n) => ({ ...n, description: n.description ?? '' })),
           sgEdges,
         );
-        const jsonStr = await chat({ system, user });
-        const parsed = JSON.parse(jsonStr);
+
+        const parsed = await runValidatedCall<TracesResult>({
+          system,
+          user,
+          label: `traces:${entryNode?.name || sg.entryId}`,
+          maxRetries: 2,
+          parse: (str) => JSON.parse(str),
+          validate: (p) => validateTracesResult(p),
+          onProgress: options?.onProgress,
+        });
 
         await writeArtifact(slug, 'traces', sg.entryId, parsed);
         options?.onProgress?.(`  ${entryNode?.name || sg.entryId} → artifact saved`);
