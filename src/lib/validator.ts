@@ -664,6 +664,59 @@ function validateOutputCaseChaining(result: PerServiceResult): ValidationError[]
   return errors;
 }
 
+// ─── Schema alignment: input_schema vs upstream output ──────────────
+
+function getNestedKeys(obj: unknown, prefix = ''): Set<string> {
+  const keys = new Set<string>();
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return keys;
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    const path = prefix ? `${prefix}.${k}` : k;
+    keys.add(path);
+    if (typeof v === 'object' && v !== null && !Array.isArray(v)) {
+      for (const nested of getNestedKeys(v, path)) keys.add(nested);
+    }
+  }
+  return keys;
+}
+
+function validateSchemaAlignment(result: PerServiceResult): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const traces = result.traces ?? [];
+  const nodeMap = new Map(result.nodes.map((n) => [n.id, n]));
+
+  for (const trace of traces) {
+    if (trace.steps.length < 2) continue;
+
+    for (let s = 1; s < trace.steps.length; s++) {
+      const prevNode = nodeMap.get(trace.steps[s - 1].node_id);
+      const currNode = nodeMap.get(trace.steps[s].node_id);
+      if (!prevNode || !currNode) continue;
+      if (!currNode.input_schema || currNode.input_schema.length === 0) continue;
+
+      // Get the fields the upstream outputs
+      const prevOutput = prevNode.output_cases?.[0]?.output;
+      if (!prevOutput || typeof prevOutput !== 'object' || prevOutput === null) continue;
+      const upstreamKeys = getNestedKeys(prevOutput);
+
+      // Check each required field in downstream's input_schema
+      for (const field of currNode.input_schema) {
+        if (!field.required) continue;
+        const rootKey = field.field.split('.')[0].split('[')[0];
+        if (!upstreamKeys.has(rootKey)) {
+          errors.push({
+            severity: 'error',
+            category: 'structure',
+            message: `Schema misalignment in trace "${trace.label}" step ${s}: node "${currNode.id}" input_schema requires "${field.field}" but upstream "${prevNode.id}" output does not contain "${rootKey}". Fix the upstream output_case to include this field with correct nesting.`,
+            path: `trace "${trace.label}" step ${s}`,
+          });
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
 // ─── Main entry point ────────────────────────────────────────────────
 
 export function validatePerServiceResult(
@@ -680,6 +733,7 @@ export function validatePerServiceResult(
     ...validateOutputCases(result),
     ...validateTraceCatchAlls(result),
     ...validateOutputCaseChaining(result),
+    ...validateSchemaAlignment(result),
   ];
 
   const criticalErrors = errors.filter((e) => e.severity === 'error');

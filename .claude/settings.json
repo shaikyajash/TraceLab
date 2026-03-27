@@ -34,7 +34,9 @@
       "Bash(find /private/tmp/tracelab-hashiraio-solver-engine -name *.rs)",
       "Bash(find /Users/lohit/Desktop/office/TraceLab/scans -name *.json -type f)",
       "Bash(curl -s -N 'http://localhost:3000/api/clone-and-scan' -X POST -H 'Content-Type: application/json' --data-raw '{\"\"url\"\":\"\"https://version.btcfi.wtf/hashiraio/solver-engine\"\",\"\"forceRescan\"\":true}')",
-      "Bash(curl -s 'http://localhost:3000/api/clone-and-scan' -X POST -H 'Content-Type: application/json' --data-raw '{\"\"\"\"url\"\"\"\":\"\"\"\"https://version.btcfi.wtf/hashiraio/order-monitor\"\"\"\",\"\"\"\"forceRescan\"\"\"\":true}')"
+      "Bash(curl -s 'http://localhost:3000/api/clone-and-scan' -X POST -H 'Content-Type: application/json' --data-raw '{\"\"\"\"url\"\"\"\":\"\"\"\"https://version.btcfi.wtf/hashiraio/order-monitor\"\"\"\",\"\"\"\"forceRescan\"\"\"\":true}')",
+      "Bash(git rebase:*)",
+      "Bash(git stash:*)"
     ],
     "additionalDirectories": ["/private/tmp/solver-engine", "/tmp", "/private/tmp"]
   }

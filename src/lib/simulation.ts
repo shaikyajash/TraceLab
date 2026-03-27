@@ -1,5 +1,5 @@
 import { ComponentNode, InputFieldSchema, SimulationStep } from './schema';
-import { matchesAll } from './conditions';
+import { matchesAll, evaluateCondition } from './conditions';
 
 export interface ResolvedOutput {
   output: unknown;
@@ -222,23 +222,31 @@ function validateInputSchema(
 
 export function resolveNodeOutput(node: ComponentNode, inputPayload: unknown): ResolvedOutput {
   // Phase 1: Validate against input_schema — repo-accurate error messages
+  // Only terminates if the field has an explicit error_message or error_status (source-derived).
+  // Auto-derived schemas without these may mismatch the chain — fall through to output_cases.
   if (node.input_schema && node.input_schema.length > 0) {
     const schemaError = validateInputSchema(inputPayload, node.input_schema);
     if (schemaError) {
-      return {
-        output: {
-          ok: false,
-          error: schemaError.message,
-          ...(schemaError.status != null ? { status: schemaError.status } : {}),
-          validation: {
-            field: schemaError.field,
-            expected: schemaError.expected,
-            actual: schemaError.actual,
+      const isSourceDerived = schemaError.status != null;
+      if (isSourceDerived) {
+        // Explicit source-code validation — trust it fully, terminate
+        return {
+          output: {
+            ok: false,
+            error: schemaError.message,
+            status: schemaError.status,
+            validation: {
+              field: schemaError.field,
+              expected: schemaError.expected,
+              actual: schemaError.actual,
+            },
           },
-        },
-        terminates: true,
-        explanation: `Input validation failed: ${schemaError.message}`,
-      };
+          terminates: true,
+          explanation: schemaError.message,
+        };
+      }
+      // Auto-derived schema — check if output_cases can handle it first.
+      // If output_cases also fail, we'll use this error as the diagnostic.
     }
   }
 
@@ -250,9 +258,44 @@ export function resolveNodeOutput(node: ComponentNode, inputPayload: unknown): R
         return { output, terminates: !!c.terminates, explanation: c.explanation };
       }
     }
+
+    // No output_case matched — produce a diagnostic showing WHY
+    // Analyze each case's conditions to show which fields failed
+    const diagnostics: string[] = [];
+    for (let i = 0; i < node.output_cases.length; i++) {
+      const c = node.output_cases[i];
+      if (!c.match || c.match.length === 0) continue; // skip catch-all (it would have matched)
+      const failedConds: string[] = [];
+      for (const cond of c.match) {
+        if (!evaluateCondition(cond, inputPayload)) {
+          const actual = getFieldValue(inputPayload, cond.field);
+          failedConds.push(
+            `${cond.field} ${cond.op}${cond.value !== undefined ? ' ' + JSON.stringify(cond.value) : ''} (got: ${JSON.stringify(actual) ?? 'undefined'})`,
+          );
+        }
+      }
+      if (failedConds.length > 0) {
+        const label = c.explanation || `case ${i + 1}`;
+        diagnostics.push(`${label}: ${failedConds.join(', ')}`);
+      }
+    }
+
+    return {
+      output: {
+        ok: false,
+        error: `No output_case matched for "${node.name}". Input does not satisfy any condition.`,
+        diagnostics,
+        input_keys:
+          typeof inputPayload === 'object' && inputPayload !== null
+            ? Object.keys(inputPayload as Record<string, unknown>)
+            : [],
+      },
+      terminates: true,
+      explanation: `No output_case matched — ${diagnostics.length} case(s) evaluated, all failed`,
+    };
   }
 
-  // Phase 3: Fallback
+  // Phase 3: Fallback — no output_cases defined
   return { output: node.example_output ?? inputPayload, terminates: false };
 }
 

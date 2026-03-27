@@ -13,8 +13,9 @@ const SKIP_DIRS = new Set([
   'benches',
   'examples',
 ]);
-const MAX_FILE_SIZE = 100 * 1024; // 100KB per file
+const MAX_FILE_SIZE = 200 * 1024; // 200KB per file (we split large ones, so raise the skip threshold)
 const MAX_TOTAL_CHARS = 400_000; // ~100k tokens total per service
+const FILE_SPLIT_THRESHOLD = 30_000; // 30K chars (~7.5K tokens) — split files larger than this
 
 /**
  * Strip #[cfg(test)] mod blocks from Rust source.
@@ -153,6 +154,89 @@ async function findRsFiles(dir: string): Promise<string[]> {
   return results;
 }
 
+/**
+ * Split a large Rust file at logical boundaries (impl blocks, fn definitions, mod blocks).
+ * Each part keeps its path with a suffix like "src/main.rs [part 1/3]".
+ */
+function splitLargeFile(
+  relativePath: string,
+  content: string,
+): Array<{ relativePath: string; content: string }> {
+  if (content.length <= FILE_SPLIT_THRESHOLD) {
+    return [{ relativePath, content }];
+  }
+
+  // Split at top-level item boundaries: impl, fn, pub fn, mod, struct, enum, trait
+  const lines = content.split('\n');
+  const parts: Array<{ relativePath: string; content: string }> = [];
+  let currentLines: string[] = [];
+  let currentSize = 0;
+
+  // Collect use statements and top-level attributes as a shared header
+  const headerLines: string[] = [];
+  let headerDone = false;
+
+  for (const line of lines) {
+    if (!headerDone) {
+      const trimmed = line.trim();
+      if (
+        trimmed.startsWith('use ') ||
+        trimmed.startsWith('//') ||
+        trimmed.startsWith('#[') ||
+        trimmed.startsWith('pub use') ||
+        trimmed === '' ||
+        (trimmed.startsWith('mod ') && !trimmed.includes('{'))
+      ) {
+        headerLines.push(line);
+        continue;
+      }
+      headerDone = true;
+    }
+    currentLines.push(line);
+    currentSize += line.length + 1;
+
+    // Split at top-level item boundaries when over threshold
+    if (currentSize >= FILE_SPLIT_THRESHOLD) {
+      const trimmed = line.trim();
+      // Look for a good split point: closing brace at indent 0, or start of new item
+      if (
+        trimmed === '}' ||
+        /^(pub\s+)?(async\s+)?fn\s/.test(trimmed) ||
+        /^(pub\s+)?impl\s/.test(trimmed) ||
+        /^(pub\s+)?struct\s/.test(trimmed) ||
+        /^(pub\s+)?enum\s/.test(trimmed) ||
+        /^(pub\s+)?trait\s/.test(trimmed)
+      ) {
+        parts.push({
+          relativePath: `${relativePath} [part ${parts.length + 1}]`,
+          content: [...headerLines, '', ...currentLines].join('\n'),
+        });
+        currentLines = [];
+        currentSize = 0;
+      }
+    }
+  }
+
+  // Remaining lines
+  if (currentLines.length > 0) {
+    if (parts.length === 0) {
+      // Never found a split point — return as single file
+      return [{ relativePath, content }];
+    }
+    parts.push({
+      relativePath: `${relativePath} [part ${parts.length + 1}]`,
+      content: [...headerLines, '', ...currentLines].join('\n'),
+    });
+  }
+
+  // Fix part numbering to include total
+  const total = parts.length;
+  return parts.map((p, i) => ({
+    relativePath: `${relativePath} [part ${i + 1}/${total}]`,
+    content: p.content,
+  }));
+}
+
 export async function readServiceSource(
   workspacePath: string,
   service: DiscoveredService,
@@ -176,9 +260,16 @@ export async function readServiceSource(
     // Strip #[cfg(test)] mod blocks — can be 60-80% of a well-tested Rust file
     content = stripTestCode(content);
 
-    if (totalChars + content.length > MAX_TOTAL_CHARS) break;
-    totalChars += content.length;
-    fileContents.push({ relativePath, content });
+    // Split large files at logical boundaries so each chunk is digestible
+    const fileParts = splitLargeFile(relativePath, content);
+
+    for (const part of fileParts) {
+      if (totalChars + part.content.length > MAX_TOTAL_CHARS) break;
+      totalChars += part.content.length;
+      fileContents.push(part);
+    }
+
+    if (totalChars >= MAX_TOTAL_CHARS) break;
   }
 
   return { ...service, rsFiles: fileContents };

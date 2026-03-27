@@ -343,11 +343,7 @@ export default function Sidebar(props: SidebarProps) {
             </CollapsibleSection>
 
             {/* BODY SECTION */}
-            <CollapsibleSection
-              title="BODY"
-              isOpen={false}
-              onToggle={() => setBodyOpen(!bodyOpen)}
-            >
+            <CollapsibleSection title="BODY" isOpen={false} onToggle={() => setBodyOpen(!bodyOpen)}>
               <textarea
                 value={reqBody}
                 onChange={(e) => setReqBody(e.target.value)}

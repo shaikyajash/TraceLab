@@ -310,6 +310,9 @@ Rules:
     WRONG: "data": "{\"orders\":[{\"id\":\"1\"}]}"   ← string containing escaped JSON
     RIGHT: "data": {"orders": [{"id": "1"}]}          ← actual parsed JSON object
   - Keep output values realistic: use the node's actual return type fields, not placeholder strings.
+  - STRICT STRUCT PARITY: output JSON must mirror the exact Rust struct nesting. If the code
+    accesses order.create_order.create_id, the output must have {"create_order":{"create_id":"x"}},
+    NOT a flattened {"create_id":"x"}. Look at source_code field access patterns to confirm nesting.
   - Success output_cases MUST carry forward enough fields for downstream nodes to evaluate
     THEIR conditions. If business_logic needs to check "authorized", then middleware's success
     output must include an "authorized" field.
@@ -1145,6 +1148,38 @@ THE SIMULATION CONTRACT
 3. If a downstream step needs a field, EVERY step between the source and that step
    MUST carry it forward in their success output.
 4. output_cases define the ACTUAL simulated payload — they are not summaries.
+
+╔══════════════════════════════════════════════════════════════════╗
+║  STRICT SCHEMA PARITY — ZERO TOLERANCE FOR STRUCTURE CHANGES    ║
+║                                                                  ║
+║  output_cases MUST match the EXACT Rust struct shape:            ║
+║                                                                  ║
+║  If the Rust code defines:                                       ║
+║    struct MatchedOrderVerbose {                                   ║
+║      create_order: CreateOrder { create_id, additional_data }    ║
+║      source_swap: SingleSwap { chain, ... }                      ║
+║    }                                                             ║
+║                                                                  ║
+║  Then the output_case output MUST be:                            ║
+║    {"create_order": {"create_id": "x", "additional_data": {}},  ║
+║     "source_swap": {"chain": "ethereum", ...}}                   ║
+║                                                                  ║
+║  NEVER flatten to: {"create_id": "x", "chain": "ethereum"}      ║
+║  NEVER rename: {"order": {...}} when the field is "create_order" ║
+║  NEVER omit nesting: {"additional_data": {...}} without wrapper  ║
+║                                                                  ║
+║  The JSON shape must be a 1:1 mirror of the Rust struct.         ║
+║  Look at the node's source_code for the actual field access      ║
+║  patterns (e.g. order.create_order.create_id) and preserve       ║
+║  that exact nesting in the output.                               ║
+║                                                                  ║
+║  UPSTREAM → DOWNSTREAM SCHEMA ALIGNMENT:                         ║
+║  Before writing a node's output_cases, check what the NEXT       ║
+║  node's input_schema expects. If it expects "create_order" as    ║
+║  an object, your output MUST contain "create_order" as an object.║
+║  If there is a mismatch, fix the OUTPUT to match downstream      ║
+║  expectations. NEVER modify input_schema to fit wrong outputs.   ║
+╚══════════════════════════════════════════════════════════════════╝
 
 ══════════════════════════════════════════════
 HOW TO WRITE output_cases
