@@ -43,6 +43,7 @@ interface GraphCanvasProps {
   handleWheel: (e: React.WheelEvent) => void;
   handleCanvasClick: (e: React.MouseEvent) => void;
   fitView: () => void;
+  resetLayout: () => void;
   setScale: React.Dispatch<React.SetStateAction<number>>;
   exportGraph: () => void;
   onNodeDrag: (nodeId: string, x: number, y: number) => void;
@@ -84,6 +85,7 @@ export default function GraphCanvas(props: GraphCanvasProps) {
     handleWheel,
     handleCanvasClick,
     fitView,
+    resetLayout,
     setScale,
     exportGraph,
     onNodeDrag,
@@ -533,6 +535,7 @@ export default function GraphCanvas(props: GraphCanvasProps) {
             )}
             {[
               { label: 'fit view', action: fitView },
+              { label: 'reset layout', action: resetLayout },
               {
                 label: '+ zoom',
                 action: () => setScale((s) => Math.min(MAX_SCALE, s + SCALE_STEP)),

@@ -562,6 +562,12 @@ export default function Home() {
     downloadAnchorNode.remove();
   }, [graph]);
 
+  const resetLayout = useCallback(() => {
+    if (!graph) return;
+    setPositions(layoutNodes(coreNodes, coreEdges));
+    requestAnimationFrame(() => fitView());
+  }, [graph, coreNodes, coreEdges, fitView]);
+
   const handleNodeDrag = useCallback((nodeId: string, x: number, y: number) => {
     setPositions((prev) => {
       const next = new Map(prev);
@@ -939,6 +945,7 @@ export default function Home() {
           handleWheel={handleWheel}
           handleCanvasClick={handleCanvasClick}
           fitView={fitView}
+          resetLayout={resetLayout}
           setScale={setScale}
           exportGraph={exportGraph}
           onNodeDrag={handleNodeDrag}
