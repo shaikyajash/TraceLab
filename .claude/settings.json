@@ -38,6 +38,11 @@
       "Bash(git rebase:*)",
       "Bash(git stash:*)"
     ],
-    "additionalDirectories": ["/private/tmp/solver-engine", "/tmp", "/private/tmp"]
+    "additionalDirectories": [
+      "/private/tmp/solver-engine",
+      "/tmp",
+      "/private/tmp",
+      "/Users/lohit/.claude/projects/-Users-lohit-Desktop-office-TraceLab/memory"
+    ]
   }
 }
