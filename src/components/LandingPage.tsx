@@ -62,7 +62,7 @@ export default function LandingPage(props: LandingPageProps) {
             {/* GitHub URL Section */}
             <div className="mb-6">
               <Label htmlFor="github-url" className="text-xs text-[#888] mb-2 font-medium">
-                Paste a Git repository URL to scan and visualize
+                Paste a Git repository URL or local system path to scan and visualize
               </Label>
               <form
                 onSubmit={(e) => {
@@ -76,7 +76,7 @@ export default function LandingPage(props: LandingPageProps) {
                   type="text"
                   value={githubUrl}
                   onChange={(e) => setGithubUrl(e.target.value)}
-                  placeholder="Paste git clone command or repository URL"
+                  placeholder="Paste git clone command, repository URL, or local path"
                   disabled={isScanning}
                   className="bg-[#0a0a0c] border-[#2a2a2e] text-[#ddd] placeholder:text-[#444] focus:border-[#378ADD] focus:ring-[#378ADD]"
                 />
@@ -220,7 +220,7 @@ export default function LandingPage(props: LandingPageProps) {
 
         {/* Footer Info */}
         <p className="text-center text-xs text-[#555]">
-          Supports GitHub, GitLab, Gitea, and other Git repositories
+          Supports GitHub, GitLab, Gitea, local paths, and other Git repositories
         </p>
       </div>
     </div>

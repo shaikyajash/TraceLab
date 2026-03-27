@@ -406,14 +406,50 @@ export default function Home() {
     [branch],
   );
 
+  /* detect local filesystem path input */
+  const isSystemPathInput = useCallback((input: string): boolean => {
+    const trimmed = input.trim();
+    if (!trimmed) return false;
+
+    // Common path forms: /abs, ./rel, ../rel, ~/home, file:///...
+    if (
+      trimmed.startsWith('/') ||
+      trimmed.startsWith('./') ||
+      trimmed.startsWith('../') ||
+      trimmed.startsWith('~/') ||
+      trimmed.startsWith('file://')
+    ) {
+      return true;
+    }
+
+    // Windows-style absolute path, e.g. C:\repo
+    return /^[a-zA-Z]:[\\/]/.test(trimmed);
+  }, []);
+
+  const normalizeSystemPath = useCallback((input: string): string => {
+    const trimmed = input.trim();
+    if (trimmed.startsWith('file://')) {
+      try {
+        return decodeURIComponent(new URL(trimmed).pathname);
+      } catch {
+        return trimmed.replace(/^file:\/\//, '');
+      }
+    }
+    return trimmed;
+  }, []);
+
   /* scan from GitHub URL */
   const handleScan = useCallback(async () => {
     const input = githubUrl.trim();
     if (!input) return;
 
-    const { url, branch: parsedBranch } = parseGitInput(input);
+    const usingSystemPath = isSystemPathInput(input);
+    const scanInput = usingSystemPath ? normalizeSystemPath(input) : parseGitInput(input).url;
+    const parsedBranch = usingSystemPath ? undefined : parseGitInput(input).branch;
 
-    if (parsedBranch) {
+    if (usingSystemPath) {
+      setBranch('');
+    } else if (parsedBranch) {
       setBranch(parsedBranch);
     }
 
@@ -423,10 +459,12 @@ export default function Home() {
     setScanPhase('discovering');
 
     try {
-      const res = await fetch('/api/clone-and-scan', {
+      const res = await fetch(usingSystemPath ? '/api/scan' : '/api/clone-and-scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, branch: parsedBranch, forceRescan }),
+        body: usingSystemPath
+          ? JSON.stringify({ workspacePath: scanInput, forceRescan })
+          : JSON.stringify({ url: scanInput, branch: parsedBranch, forceRescan }),
       });
 
       if (!res.ok || !res.body) {
@@ -476,7 +514,7 @@ export default function Home() {
           const data: ComponentsGraph = await loadRes.json();
           setGraph(data);
           localStorage.setItem(STORAGE_KEYS.GRAPH, JSON.stringify(data));
-          localStorage.setItem(STORAGE_KEYS.GITHUB_URL, url);
+          localStorage.setItem(STORAGE_KEYS.GITHUB_URL, scanInput);
         } else {
           throw new Error('Scan completed but failed to load graph');
         }
@@ -488,7 +526,7 @@ export default function Home() {
       setScanPhase('');
       setScanMessage('');
     }
-  }, [githubUrl, forceRescan, parseGitInput]);
+  }, [githubUrl, forceRescan, parseGitInput, isSystemPathInput, normalizeSystemPath]);
 
   /* upload JSON directly */
   const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {

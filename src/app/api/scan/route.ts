@@ -1,4 +1,5 @@
 import { NextRequest } from 'next/server';
+import os from 'os';
 import { validateWorkspacePath, discoverServices, readServiceSource } from '@/lib/scanner';
 import { analyzeService, analyzeCrossService } from '@/lib/claude';
 import { mergeAndWrite, loadExisting, getOutputFileName } from '@/lib/merger';
@@ -11,7 +12,8 @@ function encodeProgress(progress: ScanProgress): string {
 
 export async function POST(request: NextRequest) {
   const body = await request.json();
-  const workspacePath: string = body.workspacePath;
+  const rawWorkspacePath: string = body.workspacePath ?? body.path;
+  const workspacePath: string = normalizeWorkspacePath(rawWorkspacePath);
   const provider: string | undefined = body.provider;
   const forceRescan: boolean = body.forceRescan === true;
 
@@ -186,4 +188,28 @@ export async function POST(request: NextRequest) {
       Connection: 'keep-alive',
     },
   });
+}
+
+function normalizeWorkspacePath(input: string): string {
+  if (typeof input !== 'string') return '';
+
+  let normalized = input.trim();
+
+  if (normalized.startsWith('file://')) {
+    try {
+      normalized = decodeURIComponent(new URL(normalized).pathname);
+    } catch {
+      normalized = normalized.replace(/^file:\/\//, '');
+    }
+  }
+
+  if (normalized === '~') {
+    return os.homedir();
+  }
+
+  if (normalized.startsWith('~/')) {
+    return os.homedir() + normalized.slice(1);
+  }
+
+  return normalized;
 }
