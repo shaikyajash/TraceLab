@@ -155,6 +155,76 @@ interface OutputCasesResult {
   input_schemas?: Record<string, unknown[]>;
 }
 
+// Fields that indicate config/internal state — never valid in match conditions
+const BANNED_MATCH_FIELDS = new Set([
+  'client',
+  'config',
+  'settings',
+  'timeout',
+  'interval',
+  'connection',
+  'pool',
+  'cache',
+  'monitor',
+  'provider',
+  'factory',
+  'registry',
+  'http_client',
+  'reqwest_client',
+  'db',
+  'database',
+]);
+
+function isBannedMatchField(field: string): boolean {
+  const root = field.split('.')[0].split('[')[0].toLowerCase();
+  if (BANNED_MATCH_FIELDS.has(root)) return true;
+  // Also catch nested config-like fields
+  const parts = field.toLowerCase().split('.');
+  return parts.some(
+    (p) =>
+      p.includes('timeout') ||
+      p.includes('interval') ||
+      p.includes('batch_size') ||
+      p.includes('capacity') ||
+      p.includes('port') ||
+      p.includes('_secs') ||
+      p.includes('_ms') ||
+      p.includes('_seconds') ||
+      p.includes('_minutes'),
+  );
+}
+
+/** Check if a value contains stringified JSON that should be a parsed object */
+function findStringifiedJson(obj: unknown, path: string, errors: string[]): void {
+  if (typeof obj === 'string') {
+    const t = obj.trim();
+    if ((t.startsWith('{') || t.startsWith('[')) && t.length > 5) {
+      try {
+        JSON.parse(t);
+        // It IS valid JSON trapped in a string — flag it
+        errors.push(
+          `${path} contains stringified JSON "${t.slice(0, 60)}...". ` +
+            `Replace with a parsed JSON object — the simulator cannot navigate inside strings.`,
+        );
+      } catch {
+        // Not valid JSON — fine, it's just a string
+      }
+    }
+    return;
+  }
+  if (Array.isArray(obj)) {
+    for (let i = 0; i < Math.min(obj.length, 3); i++) {
+      findStringifiedJson(obj[i], `${path}[${i}]`, errors);
+    }
+    return;
+  }
+  if (typeof obj === 'object' && obj !== null) {
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      findStringifiedJson(v, `${path}.${k}`, errors);
+    }
+  }
+}
+
 function validateOutputCasesResult(parsed: unknown): string[] {
   const errors: string[] = [];
   if (typeof parsed !== 'object' || parsed === null) {
@@ -181,6 +251,25 @@ function validateOutputCasesResult(parsed: unknown): string[] {
         }
         if (c.terminates !== undefined && typeof c.terminates !== 'boolean') {
           errors.push(`output_cases["${nodeId}"][${i}] "terminates" must be boolean`);
+        }
+
+        // Check for banned config/internal fields in match conditions
+        if (Array.isArray(c.match)) {
+          for (const cond of c.match as Array<Record<string, unknown>>) {
+            const field = String(cond.field || '');
+            if (field && isBannedMatchField(field)) {
+              errors.push(
+                `output_cases["${nodeId}"][${i}] match condition references config/internal field "${field}". ` +
+                  `Match conditions must only reference DATA fields from the upstream output (e.g. "ok", "orders", "status"), ` +
+                  `not config values, timeouts, clients, or runtime objects. Remove this condition.`,
+              );
+            }
+          }
+        }
+
+        // Check for stringified JSON in output values
+        if (c.output !== undefined) {
+          findStringifiedJson(c.output, `output_cases["${nodeId}"][${i}].output`, errors);
         }
       }
     }

@@ -505,6 +505,73 @@ function validateCompleteness(result: PerServiceResult): ValidationError[] {
 
 // ─── output_cases validation ────────────────────────────────────────
 
+const BANNED_MATCH_ROOTS = new Set([
+  'client',
+  'config',
+  'settings',
+  'timeout',
+  'interval',
+  'connection',
+  'pool',
+  'cache',
+  'monitor',
+  'provider',
+  'factory',
+  'registry',
+  'http_client',
+  'reqwest_client',
+  'db',
+  'database',
+]);
+
+function isConfigField(field: string): boolean {
+  const root = field.split('.')[0].split('[')[0].toLowerCase();
+  if (BANNED_MATCH_ROOTS.has(root)) return true;
+  const parts = field.toLowerCase().split('.');
+  return parts.some(
+    (p) =>
+      p.includes('timeout') ||
+      p.includes('interval') ||
+      p.includes('batch_size') ||
+      p.includes('capacity') ||
+      p.includes('port') ||
+      p.includes('_secs') ||
+      p.includes('_ms') ||
+      p.includes('_seconds') ||
+      p.includes('_minutes'),
+  );
+}
+
+function findStringifiedJsonErrors(obj: unknown, path: string): string[] {
+  const errs: string[] = [];
+  if (typeof obj === 'string') {
+    const t = obj.trim();
+    if ((t.startsWith('{') || t.startsWith('[')) && t.length > 5) {
+      try {
+        JSON.parse(t);
+        errs.push(
+          `${path} contains stringified JSON "${t.slice(0, 60)}...". Replace with a parsed JSON object.`,
+        );
+      } catch {
+        /* not JSON */
+      }
+    }
+    return errs;
+  }
+  if (Array.isArray(obj)) {
+    for (let i = 0; i < Math.min(obj.length, 3); i++) {
+      errs.push(...findStringifiedJsonErrors(obj[i], `${path}[${i}]`));
+    }
+    return errs;
+  }
+  if (typeof obj === 'object' && obj !== null) {
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      errs.push(...findStringifiedJsonErrors(v, `${path}.${k}`));
+    }
+  }
+  return errs;
+}
+
 const SKIP_OUTPUT_CASES_KINDS = new Set(['struct', 'enum']);
 
 function validateOutputCases(result: PerServiceResult): ValidationError[] {
@@ -564,6 +631,30 @@ function validateOutputCases(result: PerServiceResult): ValidationError[] {
         for (let m = 0; m < oc.match.length; m++) {
           const condErrors = validateCondition(oc.match[m], `${p}.match[${m}]`);
           errors.push(...condErrors);
+
+          // Check for config/internal field references in match
+          const field = oc.match[m]?.field;
+          if (field && isConfigField(field)) {
+            errors.push({
+              severity: 'error',
+              category: 'structure',
+              message: `Node "${node.id}" output_case[${j}] match[${m}] references config/internal field "${field}". Match conditions must only reference data fields from the upstream node's output (e.g. "ok", "orders", "status"), not config values or runtime objects.`,
+              path: `${p}.match[${m}]`,
+            });
+          }
+        }
+      }
+
+      // Check for stringified JSON in output values
+      if (oc.output !== undefined) {
+        const strJsonErrors = findStringifiedJsonErrors(oc.output, `${p}.output`);
+        for (const msg of strJsonErrors) {
+          errors.push({
+            severity: 'error',
+            category: 'structure',
+            message: msg,
+            path: `${p}.output`,
+          });
         }
       }
 

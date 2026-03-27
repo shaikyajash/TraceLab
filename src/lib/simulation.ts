@@ -252,11 +252,31 @@ export function resolveNodeOutput(node: ComponentNode, inputPayload: unknown): R
 
   // Phase 2: Evaluate output_cases — business logic branching
   if (node.output_cases && node.output_cases.length > 0) {
+    // Pass 1: exact match (all conditions pass)
     for (const c of node.output_cases) {
       if (matchesAll(c.match, inputPayload)) {
         const output = mergeInputIntoOutput(c.output, inputPayload);
         return { output, terminates: !!c.terminates, explanation: c.explanation };
       }
+    }
+
+    // Pass 2: best partial match — find the non-terminating case with the most conditions passing.
+    // This handles LLM-generated match conditions that are overly specific (e.g. "client.timeout eq 5").
+    // The real business logic condition (e.g. "orders exists") may pass even if irrelevant ones don't.
+    let bestCase: (typeof node.output_cases)[0] | null = null;
+    let bestScore = 0;
+    for (const c of node.output_cases) {
+      if (!c.match || c.match.length === 0) continue; // skip catch-all
+      if (c.terminates) continue; // only consider success paths
+      const passing = c.match.filter((cond) => evaluateCondition(cond, inputPayload)).length;
+      if (passing > bestScore) {
+        bestScore = passing;
+        bestCase = c;
+      }
+    }
+    if (bestCase && bestScore > 0) {
+      const output = mergeInputIntoOutput(bestCase.output, inputPayload);
+      return { output, terminates: !!bestCase.terminates, explanation: bestCase.explanation };
     }
 
     // No output_case matched — produce a diagnostic showing WHY

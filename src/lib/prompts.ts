@@ -1215,17 +1215,91 @@ STEP C — Write output_cases:
   5. CATCH-ALL: Optional match: [] as last case with "terminates": true.
 
 ══════════════════════════════════════════════
-CONDITION FORMAT
+MATCH CONDITION RULES — WHAT TO MATCH ON
+══════════════════════════════════════════════
+
+Match conditions decide WHICH output_case fires. They must reference DATA FIELDS
+that the user can control — never config values, constants, or internal state.
+
+╔══════════════════════════════════════════════════════════════════╗
+║  MATCH CONDITIONS MUST ONLY REFERENCE:                           ║
+║    - Fields from the UPSTREAM node's output                      ║
+║    - Data that changes based on the user's input                 ║
+║    - Business-logic discriminators (ok, status, action, type)    ║
+║                                                                  ║
+║  MATCH CONDITIONS MUST NEVER REFERENCE:                          ║
+║    - Config values (timeout, port, url, interval, batch_size)    ║
+║    - Internal state (client, connection, cache, pool)            ║
+║    - Constants (hardcoded numbers like 5, 30, 1000)              ║
+║    - Runtime objects (provider, factory, registry, monitor)      ║
+║    - Connection handles (db, http_client, reqwest::Client)       ║
+║                                                                  ║
+║  WRONG: {"field": "client.timeout_secs", "op": "eq", "value": 5}║
+║  WRONG: {"field": "config.polling_interval", "op": "exists"}    ║
+║  WRONG: {"field": "monitor", "op": "exists"}                    ║
+║  RIGHT: {"field": "orders", "op": "exists"}                     ║
+║  RIGHT: {"field": "ok", "op": "eq", "value": true}              ║
+║  RIGHT: {"field": "create_order.create_id", "op": "exists"}     ║
+║  RIGHT: {"field": "status", "op": "in", "value": ["200","201"]} ║
+╚══════════════════════════════════════════════════════════════════╝
+
+  Good match patterns:
+    - "ok" eq true / "ok" eq false         → success vs error branching
+    - "orders" exists                       → data present
+    - "orders[0]" exists                    → non-empty array
+    - "status" in ["200", "201"]            → HTTP status branching
+    - "create_order.create_id" exists       → required field present
+    - "action" eq "generate"                → action dispatch
+
+  Bad match patterns (NEVER USE):
+    - "client.timeout_secs" eq 5            → config value, not data
+    - "monitor.caches" exists               → runtime internal state
+    - "reqwest_client" exists               → connection handle
+    - "Settings.polling_interval" eq 30     → config constant
+
+══════════════════════════════════════════════
+OUTPUT VALUE RULES
 ══════════════════════════════════════════════
 
 {"field": "ok", "op": "eq", "value": true}
 Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field, eq_type
 
+ALL output values must be PARSED JSON — never stringified:
+  WRONG: "response": "{\"result\":[{\"id\":\"1\"}]}"     ← escaped JSON string
+  RIGHT: "response": {"result": [{"id": "1"}]}            ← actual JSON object
+
+  WRONG: "orders": "[{\"create_id\":\"x\"}]"             ← array as string
+  RIGHT: "orders": [{"create_id": "x"}]                   ← actual array
+
+  If the real code returns a string that contains JSON (e.g. response body text),
+  the output_case must PARSE it into a real object. The simulator cannot navigate
+  inside stringified JSON — it sees it as an opaque string.
+
 ══════════════════════════════════════════════
-SELF-CHECK
+SELF-CHECK — RUN THIS BEFORE FINALIZING
 ══════════════════════════════════════════════
 
-After writing all output_cases, walk each call chain:
+After writing all output_cases, verify EVERY rule passes:
+
+1. CHAIN FLOW: Walk each call chain step by step:
+   Take step 1's success output → does step 2's match reference those fields? ✓
+   Take step 2's success output → does step 3's match reference those fields? ✓
+   ... all the way to the leaf. If any link breaks, fix it.
+
+2. STRUCT PARITY: For every output value, check the node's source_code.
+   If the code accesses order.create_order.create_id, the output must have
+   {"create_order": {"create_id": "x"}} — not flattened {"create_id": "x"}.
+
+3. NO STRINGIFIED JSON: Search every output value for escaped quotes (\").
+   If found, replace the string with a parsed JSON object.
+
+4. NO CONFIG IN MATCH: Search every match condition. If any field references
+   config, client, timeout, interval, cache, pool, connection, settings —
+   REMOVE that condition. Replace with a data field from upstream output.
+
+5. MATCH FIELD EXISTS UPSTREAM: For each match condition, verify the field
+   name appears as a key in the PREVIOUS step's success output.
+   If not, the condition will always fail — fix the upstream output or the condition.
   Take entry's success output → does step 2's match reference those fields? ✓
   Take step 2's success output → does step 3's match reference those fields? ✓
   ... all the way to the leaf. If any link breaks, fix it.`;
