@@ -182,30 +182,25 @@ export default function Sidebar(props: SidebarProps) {
     }
   }, [selectedNode, expandedStep, traceSteps]);
 
-  // Expand Inspector only on manual click, not during/after simulation
+  // Expand Inspector and scroll when a node is selected
   useEffect(() => {
     if (selectedNode && !isTracing) {
-      // Only open inspector if user manually clicked (check if expandedStep was set by user click)
-      const wasManualClick = expandedStep !== null;
-      
-      if (wasManualClick) {
-        setInspectorOpen(true);
+      setInspectorOpen(true);
 
-        // If there's an error in the expanded step, scroll to it
-        setTimeout(() => {
-          if (expandedStep !== null && traceSteps[expandedStep]?.terminated && errorRef.current) {
-            errorRef.current.scrollIntoView({
-              behavior: 'smooth',
-              block: 'center',
-            });
-          } else {
-            inspectorRef.current?.scrollIntoView({
-              behavior: 'smooth',
-              block: 'start',
-            });
-          }
-        }, 310);
-      }
+      // Scroll to inspector or error
+      setTimeout(() => {
+        if (expandedStep !== null && traceSteps[expandedStep]?.terminated && errorRef.current) {
+          errorRef.current.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+          });
+        } else {
+          inspectorRef.current?.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start',
+          });
+        }
+      }, 310);
     }
   }, [selectedNode, isTracing, expandedStep]);
 
@@ -332,27 +327,138 @@ export default function Sidebar(props: SidebarProps) {
       {/* Sections Content */}
       <div className="flex-1 overflow-y-auto p-4 relative" style={{ scrollBehavior: 'smooth' }}>
         {!traceRouteId ? (
-          /* Empty state when no route selected */
-          <div className="flex flex-col items-center justify-center h-full text-center px-6">
-            <svg
-              className="w-16 h-16 text-[#2a2a2e] mb-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+          <>
+            {/* PARAMS SECTION */}
+            <CollapsibleSection
+              title="PARAMS"
+              isOpen={false}
+              onToggle={() => setParamsOpen(!paramsOpen)}
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1}
-                d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
+              <div className="text-[11px] text-[#555] py-2 text-center">No route selected</div>
+            </CollapsibleSection>
+
+            {/* BODY SECTION */}
+            <CollapsibleSection
+              title="BODY"
+              isOpen={false}
+              onToggle={() => setBodyOpen(!bodyOpen)}
+            >
+              <textarea
+                value={reqBody}
+                onChange={(e) => setReqBody(e.target.value)}
+                placeholder='{"action": "Generate", ...}'
+                spellCheck={false}
+                className="w-full min-h-[120px] bg-[#111114] border-[0.5px] border-[#2a2a2e] rounded-md p-2.5 text-[#ddd] text-[11px] outline-none box-border resize-y leading-relaxed mb-1"
               />
-            </svg>
-            <h3 className="text-[13px] text-[#888] font-semibold mb-2">Select an Entry Point</h3>
-            <p className="text-[11px] text-[#555] leading-relaxed max-w-[240px]">
-              Choose an entry point from the dropdown above to start simulating and exploring the
-              trace flow
-            </p>
-          </div>
+            </CollapsibleSection>
+
+            {/* INSPECTOR SECTION */}
+            <div ref={inspectorRef}>
+              <CollapsibleSection
+                title="INSPECTOR"
+                isOpen={inspectorOpen}
+                onToggle={() => setInspectorOpen(!inspectorOpen)}
+              >
+                {!selectedNode ? (
+                  <div className="text-[#555] text-[11px] text-center py-2 leading-relaxed">
+                    No node selected
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="text-[13px] text-[#ddd] font-semibold">{selectedNode.name}</div>
+
+                    <Field label="KIND">
+                      <span
+                        className="inline-block text-[9px] font-bold tracking-wide px-[7px] py-[3px] rounded"
+                        style={{
+                          background: (KIND_COLORS[selectedNode.kind] || KIND_COLORS.business_logic)
+                            .badgeBg,
+                          color: (KIND_COLORS[selectedNode.kind] || KIND_COLORS.business_logic)
+                            .badgeText,
+                        }}
+                      >
+                        {KIND_LABELS[selectedNode.kind] || selectedNode.kind.toUpperCase()}
+                      </span>
+                    </Field>
+
+                    <Field label="DEFINED IN">{selectedNode.defined_in || '—'}</Field>
+
+                    <Field label="MUTATES STATE">
+                      <span
+                        className="inline-block text-[9px] font-semibold px-2.5 py-[3px] rounded-xl border-[0.5px]"
+                        style={{
+                          background: selectedNode.mutates_state ? '#2d1a0a' : '#0d1f0d',
+                          borderColor: selectedNode.mutates_state ? '#633806' : '#27500A',
+                          color: selectedNode.mutates_state ? '#EF9F27' : '#639922',
+                        }}
+                      >
+                        {selectedNode.mutates_state ? 'YES' : 'NO'}
+                      </span>
+                    </Field>
+
+                    {selectedNode.description && (
+                      <Field label="DESCRIPTION">{selectedNode.description}</Field>
+                    )}
+
+                    {(() => {
+                      const inEdges = coreEdges.filter((e) => e.to === selectedNode.id);
+                      if (inEdges.length === 0) return null;
+                      return (
+                        <Field label={`RECEIVES FROM (${inEdges.length})`}>
+                          {inEdges.map((e, i) => (
+                            <div key={i} className={i > 0 ? 'mt-2' : ''}>
+                              <div className="text-[10px] text-[#378ADD] font-medium">
+                                {nodeById(e.from)?.name || e.from}
+                              </div>
+                              {e.payload && (
+                                <div className="text-[9px] text-[#666] mt-0.5">{e.payload}</div>
+                              )}
+                            </div>
+                          ))}
+                        </Field>
+                      );
+                    })()}
+
+                    {(() => {
+                      const outEdges = coreEdges.filter((e) => e.from === selectedNode.id);
+                      if (outEdges.length === 0) return null;
+                      return (
+                        <Field label={`SENDS TO (${outEdges.length})`}>
+                          {outEdges.map((e, i) => (
+                            <div key={i} className={i > 0 ? 'mt-2' : ''}>
+                              <div className="text-[10px] text-[#1D9E75] font-medium">
+                                {nodeById(e.to)?.name || e.to}
+                              </div>
+                              {e.payload && (
+                                <div className="text-[9px] text-[#666] mt-0.5">{e.payload}</div>
+                              )}
+                            </div>
+                          ))}
+                        </Field>
+                      );
+                    })()}
+                  </div>
+                )}
+              </CollapsibleSection>
+            </div>
+
+            {/* TRACE FLOW SECTION */}
+            <CollapsibleSection
+              title={
+                <div className="flex items-center gap-2">
+                  <span>TRACE FLOW</span>
+                </div>
+              }
+              isOpen={false}
+              onToggle={() => setTraceFlowOpen(!traceFlowOpen)}
+            >
+              <div className="text-[#555] text-[11px] text-center my-4 leading-relaxed">
+                No trace available
+                <br />
+                Run a simulation first
+              </div>
+            </CollapsibleSection>
+          </>
         ) : (
           <>
             {/* PARAMS SECTION — only for HTTP route_handlers with path params */}
