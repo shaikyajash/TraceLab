@@ -723,11 +723,16 @@ function validateOutputCaseChaining(result: PerServiceResult): ValidationError[]
     if (trace.steps.length < 2) continue;
 
     for (let s = 1; s < trace.steps.length; s++) {
+      const step = trace.steps[s];
       const prevNode = nodeMap.get(trace.steps[s - 1].node_id);
-      const currNode = nodeMap.get(trace.steps[s].node_id);
+      const currNode = nodeMap.get(step.node_id);
       if (!prevNode || !currNode) continue;
       if (SKIP_OUTPUT_CASES_KINDS.has(currNode.kind)) continue;
       if (!currNode.output_cases || currNode.output_cases.length === 0) continue;
+
+      // Skip if step has input_mapping — the node receives transformed input,
+      // so its match conditions reference the mapped fields, not raw upstream output.
+      if (step.input_mapping && Object.keys(step.input_mapping).length > 0) continue;
 
       // Get fields that the previous node outputs (from its first/success output_case)
       const prevOutput = prevNode.output_cases?.[0]?.output;
@@ -789,18 +794,27 @@ function validateSchemaAlignment(result: PerServiceResult): ValidationError[] {
       if (!prevOutput || typeof prevOutput !== 'object' || prevOutput === null) continue;
       const upstreamKeys = getNestedKeys(prevOutput);
 
+      // Skip if step has input_mapping — it handles the transformation
+      const step = trace.steps[s];
+      if (step.input_mapping && Object.keys(step.input_mapping).length > 0) continue;
+
       // Check each required field in downstream's input_schema
+      const missingFields: string[] = [];
       for (const field of currNode.input_schema) {
         if (!field.required) continue;
         const rootKey = field.field.split('.')[0].split('[')[0];
         if (!upstreamKeys.has(rootKey)) {
-          errors.push({
-            severity: 'error',
-            category: 'structure',
-            message: `Schema misalignment in trace "${trace.label}" step ${s}: node "${currNode.id}" input_schema requires "${field.field}" but upstream "${prevNode.id}" output does not contain "${rootKey}". Fix the upstream output_case to include this field with correct nesting.`,
-            path: `trace "${trace.label}" step ${s}`,
-          });
+          missingFields.push(field.field);
         }
+      }
+
+      if (missingFields.length > 0) {
+        errors.push({
+          severity: 'error',
+          category: 'structure',
+          message: `Schema misalignment in trace "${trace.label}" step ${s}: node "${currNode.id}" needs [${missingFields.join(', ')}] but upstream "${prevNode.id}" outputs [${Array.from(upstreamKeys).filter((k) => !k.includes('.')).join(', ')}]. Add input_mapping to this trace step to extract the right fields, or fix the upstream output to include them.`,
+          path: `trace "${trace.label}" step ${s}`,
+        });
       }
     }
   }

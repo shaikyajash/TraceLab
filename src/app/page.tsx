@@ -10,7 +10,7 @@ import type {
   TraceStepDef,
 } from '@/types';
 import { resolveTrace } from '@/lib/trace-resolver';
-import { resolveNodeOutput } from '@/lib/simulation';
+import { resolveNodeOutput, applyInputMapping } from '@/lib/simulation';
 import {
   CORE_KINDS,
   NODE_W,
@@ -670,10 +670,13 @@ export default function Home() {
     const steps: TraceStep[] = [];
     for (const s of resolvedStepDefs) {
       const node = nodeMap.get(s.node_id);
-      const inputPayload = currentPayload;
+      // Apply input_mapping: transform prev output into what this node expects
+      const inputPayload = s.input_mapping
+        ? applyInputMapping(currentPayload, s.input_mapping)
+        : currentPayload;
       const resolved = node
         ? resolveNodeOutput(node, inputPayload)
-        : { output: inputPayload, terminates: false };
+        : { output: inputPayload, terminates: false, explanation: undefined };
       currentPayload = resolved.output;
       steps.push({
         nodeId: s.node_id,
@@ -867,14 +870,28 @@ export default function Home() {
     (stepIndex: number, nodeId: string, newInput: unknown) => {
       if (!graph || !traceRouteId) return;
 
-      // Helper: recompute outputs from a start index using FULL template
-      const recompute = (fromIdx: number, input: unknown): TraceStep[] => {
-        // Build full template from resolvedStepDefs (never truncated)
-        const fullTemplate = buildFullTemplate(resolvedStepDefsRef.current, nodeMap);
-        // Keep steps before fromIdx from current trace
-        const kept = traceStepsRef.current.slice(0, fromIdx);
-        const extended = recomputeFromStep(fullTemplate, fromIdx, input, nodeMap);
-        return [...kept, ...extended];
+      // Helper: recompute outputs from a start index, stopping if a step terminates
+      const recompute = (steps: TraceStep[], fromIdx: number, input: unknown): TraceStep[] => {
+        const result = steps.slice(0, fromIdx);
+        let current = input;
+        for (let i = fromIdx; i < steps.length; i++) {
+          const node = nodeMap.get(steps[i].nodeId);
+          const res = node
+            ? resolveNodeOutput(node, current)
+            : { output: current, terminates: false, explanation: undefined };
+          result.push({
+            ...steps[i],
+            inputPayload: current,
+            outputPayload: res.output,
+            terminated: res.terminates,
+            terminatedReason: res.terminates
+              ? (res.explanation ?? 'Execution terminated at this step')
+              : undefined,
+          });
+          if (res.terminates) break;
+          current = res.output;
+        }
+        return result;
       };
 
       // ── Step 0: the user edited the request body itself ──

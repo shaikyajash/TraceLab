@@ -1,5 +1,21 @@
-import { ComponentNode, InputFieldSchema, SimulationStep } from './schema';
+import { ComponentNode, InputFieldSchema, SimulationStep, TraceStepDef } from './schema';
 import { matchesAll, evaluateCondition } from './conditions';
+
+/**
+ * Apply input_mapping to transform the previous step's output into
+ * the shape this step's node expects.
+ *
+ * Example: prev output = {orders: [{create_order: {create_id: "x"}, source_swap: {...}}]}
+ * mapping = {"create_order": "orders[0].create_order", "source_swap": "orders[0].source_swap"}
+ * result = {create_order: {create_id: "x"}, source_swap: {...}}
+ */
+export function applyInputMapping(prevOutput: unknown, mapping: Record<string, string>): unknown {
+  const result: Record<string, unknown> = {};
+  for (const [targetField, sourcePath] of Object.entries(mapping)) {
+    result[targetField] = getFieldValue(prevOutput, sourcePath);
+  }
+  return result;
+}
 
 export interface ResolvedOutput {
   output: unknown;
