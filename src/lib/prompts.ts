@@ -508,6 +508,40 @@ STEP 2 — Write one trace per distinct path. Most-specific FIRST, catch-alls LA
     edge_label       data flowing IN to this step ("" for first step)
     summary          what happens here and why — include condition evaluation result
     when             (optional) this step is skipped if condition is false
+    input_mapping    (optional) maps previous step's output fields to this step's expected input.
+                     Use when the node's function signature expects a DIFFERENT shape than
+                     what the previous step outputs.
+
+                     Example: prev step outputs {orders: [{create_order: {...}, source_swap: {...}}]}
+                     but this step is check_order_state(&MatchedOrderVerbose) — expects a single order:
+                       input_mapping: {
+                         "create_order": "orders[0].create_order",
+                         "source_swap": "orders[0].source_swap",
+                         "destination_swap": "orders[0].destination_swap"
+                       }
+
+                     WHEN TO USE input_mapping (REQUIRED in these cases):
+                       - Node receives a single item from a list (for-each loop)
+                       - Node receives a subset of fields (function takes specific args, not entire prev output)
+                       - Node receives a nested value (e.g. "result.orders" not the whole result)
+                       - Previous step's output has many fields but this node only uses 2-3 of them
+                       - The function signature takes specific typed arguments, not a generic "state" object
+
+                     Example — main() outputs {settings, webhook_url, caches, monitor} but
+                     setup_tracing_with_webhook() only takes (webhook_url, service_label):
+                       input_mapping: {"webhook_url": "webhook_url", "service_label": "settings.service_label"}
+
+                     Example — filter_orders outputs {orders: [...], caches: {...}} but
+                     check_order_state() takes a single &MatchedOrderVerbose:
+                       input_mapping: {"create_order": "orders[0].create_order", "source_swap": "orders[0].source_swap"}
+
+                     HOW TO DECIDE: Look at the source_code of this node's function.
+                     What are the PARAMETER NAMES? Those are the keys in input_mapping.
+                     Where do those values come from in the previous step's output? Those are the paths.
+
+                     When NOT needed (omit input_mapping):
+                       - Node receives the entire previous output as-is
+                       - Previous output shape already matches this node's input type exactly
 
 STEP 3 — Condition format (used in both "match" and "when"):
     {"field": "action",    "op": "eq",        "value": "create"}
@@ -971,10 +1005,15 @@ Trace fields:
   steps            complete ordered list (see above)
 
 Step fields:
-  node_id     id from the nodes list (must exist)
-  edge_label  data flowing in ("" for step 1)
-  summary     what happens here and why, including condition evaluation result
-  when        (optional) skip this step if condition fails
+  node_id        id from the nodes list (must exist)
+  edge_label     data flowing in ("" for step 1)
+  summary        what happens here and why, including condition evaluation result
+  when           (optional) skip this step if condition fails
+  input_mapping  (optional) maps previous output fields to this step's expected input shape.
+                 Use when the node expects a DIFFERENT structure than the previous output.
+                 Example — node processes one order from a list:
+                   input_mapping: {"create_order": "orders[0].create_order", "source_swap": "orders[0].source_swap"}
+                 Omit when the node receives the entire previous output as-is.
 
 Condition format: {"field": "x", "op": "eq", "value": "y"}
 Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field, eq_type`}`;

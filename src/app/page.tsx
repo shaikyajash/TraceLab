@@ -10,7 +10,7 @@ import type {
   TraceStepDef,
 } from '@/types';
 import { resolveTrace } from '@/lib/trace-resolver';
-import { resolveNodeOutput } from '@/lib/simulation';
+import { resolveNodeOutput, applyInputMapping } from '@/lib/simulation';
 import {
   CORE_KINDS,
   NODE_W,
@@ -657,10 +657,13 @@ export default function Home() {
     const steps: TraceStep[] = [];
     for (const s of resolvedStepDefs) {
       const node = nodeMap.get(s.node_id);
-      const inputPayload = currentPayload;
+      // Apply input_mapping: transform prev output into what this node expects
+      const inputPayload = s.input_mapping
+        ? applyInputMapping(currentPayload, s.input_mapping)
+        : currentPayload;
       const resolved = node
         ? resolveNodeOutput(node, inputPayload)
-        : { output: inputPayload, terminates: false };
+        : { output: inputPayload, terminates: false, explanation: undefined };
       currentPayload = resolved.output;
       steps.push({
         nodeId: s.node_id,
@@ -773,7 +776,7 @@ export default function Home() {
           const node = nodeMap.get(steps[i].nodeId);
           const res = node
             ? resolveNodeOutput(node, current)
-            : { output: current, terminates: false };
+            : { output: current, terminates: false, explanation: undefined };
           result.push({
             ...steps[i],
             inputPayload: current,
@@ -783,7 +786,7 @@ export default function Home() {
               ? (res.explanation ?? 'Execution terminated at this step')
               : undefined,
           });
-          if (res.terminates) break; // chain stops here
+          if (res.terminates) break;
           current = res.output;
         }
         return result;

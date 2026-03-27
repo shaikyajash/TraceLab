@@ -50,6 +50,18 @@ export interface TraceStepDef {
   summary: string;
   /** If set, this step is included only when the condition is true against the input payload */
   when?: StepCondition;
+  /**
+   * Maps previous step's output to this step's expected input shape.
+   * Each key is a field name in this step's input, each value is a dot-notation
+   * path into the previous step's output.
+   *
+   * Example: if previous step outputs {orders: [{create_order: {...}}], caches: {...}}
+   * and this step expects a single MatchedOrderVerbose:
+   *   input_mapping: {"create_order": "orders[0].create_order", "source_swap": "orders[0].source_swap"}
+   *
+   * If absent, the entire previous output is passed as-is (backwards compatible).
+   */
+  input_mapping?: Record<string, string>;
 }
 
 export interface ServiceInfo {
