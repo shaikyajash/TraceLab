@@ -1,6 +1,7 @@
 import { DiscoveredService, PerServiceResult, CrossServiceCall } from './schema';
 import {
   buildPerServicePrompt,
+  buildOutputCasesPrompt,
   buildCrossServicePrompt,
   buildTracesOnlyPrompt,
   SOURCE_CHAR_LIMITS,
@@ -9,6 +10,15 @@ import {
 import { chat, getModelName as _getModelName, getConfig } from './llm';
 import { resolveExternalTypes, type ResolvedExternalType } from './external-types';
 import { validatePerServiceResult } from './validator';
+import {
+  writeArtifact,
+  completedEntries,
+  readArtifacts,
+  aggregateStructure,
+  aggregateOutputCases,
+  aggregateTraces,
+  cleanupArtifacts,
+} from './artifacts';
 
 export { _getModelName as getModelName };
 
@@ -36,51 +46,7 @@ CURRENT JSON:
 ${JSON.stringify(result, null, 2)}`;
 }
 
-function mergePartialResults(parts: PerServiceResult[]): PerServiceResult {
-  const seenNodes = new Set<string>();
-  const seenEdges = new Set<string>();
-  const seenMutations = new Set<string>();
-  const seenPackages = new Set<string>();
-
-  const nodes: PerServiceResult['nodes'] = [];
-  const edges: PerServiceResult['edges'] = [];
-  const mutations: PerServiceResult['mutations'] = [];
-  const external_packages: PerServiceResult['external_packages'] = [];
-  const traces: NonNullable<PerServiceResult['traces']> = [];
-
-  for (const part of parts) {
-    for (const n of part.nodes) {
-      if (!seenNodes.has(n.id)) {
-        seenNodes.add(n.id);
-        nodes.push(n);
-      }
-    }
-    for (const e of part.edges) {
-      const key = `${e.from}→${e.to}`;
-      if (!seenEdges.has(key)) {
-        seenEdges.add(key);
-        edges.push(e);
-      }
-    }
-    for (const m of part.mutations) {
-      if (!seenMutations.has(m.id)) {
-        seenMutations.add(m.id);
-        mutations.push(m);
-      }
-    }
-    for (const p of part.external_packages) {
-      if (!seenPackages.has(p.crate)) {
-        seenPackages.add(p.crate);
-        external_packages.push(p);
-      }
-    }
-    for (const t of part.traces ?? []) {
-      traces.push(t);
-    }
-  }
-
-  return { service: parts[0].service, nodes, edges, mutations, external_packages, traces };
-}
+// mergePartialResults moved to artifacts.ts as aggregateStructure()
 
 // ─── Single-chunk LLM call + parse + repair ──────────────────────────
 
@@ -135,18 +101,90 @@ async function runAnalysisCall(
   return result;
 }
 
+// ─── Concurrency helper ─────────────────────────────────────────────
+
+async function runParallel<T>(tasks: (() => Promise<T>)[], concurrency: number): Promise<T[]> {
+  const results: T[] = new Array(tasks.length);
+  let nextIdx = 0;
+
+  async function worker() {
+    while (nextIdx < tasks.length) {
+      const idx = nextIdx++;
+      results[idx] = await tasks[idx]();
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
+// ─── Subgraph extraction for per-entry-point Phase 2/3 ──────────────
+
+interface EntrySubgraph {
+  entryId: string;
+  nodeIds: Set<string>;
+}
+
+function extractEntrySubgraphs(
+  nodes: PerServiceResult['nodes'],
+  edges: PerServiceResult['edges'],
+): EntrySubgraph[] {
+  const adj = new Map<string, string[]>();
+  const incomingNodes = new Set<string>();
+  for (const e of edges) {
+    if (!adj.has(e.from)) adj.set(e.from, []);
+    adj.get(e.from)!.push(e.to);
+    incomingNodes.add(e.to);
+  }
+
+  const ENTRY_KINDS = new Set([
+    'route_handler',
+    'function',
+    'business_logic',
+    'background_process',
+    'message_queue',
+  ]);
+  const entryPoints = nodes.filter(
+    (n) => ENTRY_KINDS.has(n.kind) && (!incomingNodes.has(n.id) || n.kind === 'route_handler'),
+  );
+
+  return entryPoints.map((ep) => {
+    const visited = new Set<string>();
+    const queue = [ep.id];
+    visited.add(ep.id);
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      for (const next of adj.get(id) || []) {
+        if (!visited.has(next)) {
+          visited.add(next);
+          queue.push(next);
+        }
+      }
+    }
+    return { entryId: ep.id, nodeIds: visited };
+  });
+}
+
 // ─── Service analysis ────────────────────────────────────────────────
 
 export interface AnalyzeOptions {
   workspacePath?: string;
   maxRepairAttempts?: number;
   onProgress?: (message: string) => void;
+  /** Slug used for artifact persistence (derived from repo URL) */
+  slug?: string;
 }
+
+/** Max parallel LLM calls per phase */
+const PHASE_CONCURRENCY = 3;
 
 export async function analyzeService(
   service: DiscoveredService,
   options?: AnalyzeOptions,
 ): Promise<PerServiceResult> {
+  const slug = options?.slug || service.name;
+
   if (service.rsFiles.length === 0) {
     return {
       service: {
@@ -162,7 +200,7 @@ export async function analyzeService(
     };
   }
 
-  // Step 1: Resolve external types
+  // ── Phase 0: Resolve external types ──
   let externalTypes: ResolvedExternalType[] = [];
   if (options?.workspacePath) {
     try {
@@ -178,7 +216,7 @@ export async function analyzeService(
     }
   }
 
-  // Step 2: Split into chunks if service exceeds the provider's budget
+  // ── Phase 1: Structure extraction (parallel chunks, persisted) ──
   const { provider } = getConfig();
   const chunkBudget = SOURCE_CHAR_LIMITS[provider] ?? Infinity;
   const allFileNames = service.rsFiles.map((f) => f.relativePath);
@@ -199,19 +237,26 @@ export async function analyzeService(
   }
   if (current.length > 0) chunks.push(current);
 
-  // Step 3: Analyze each chunk (sequentially to respect rate limits)
-  const partialResults: PerServiceResult[] = [];
-  for (let i = 0; i < chunks.length; i++) {
+  // Check which chunks already have artifacts (retry-safe)
+  const doneChunks = await completedEntries(slug, 'structure');
+
+  options?.onProgress?.(
+    `Phase 1: ${chunks.length} chunk(s), ${doneChunks.size} already done — extracting structure...`,
+  );
+
+  const chunkTasks = chunks.map((chunk, i) => async () => {
+    const label = chunks.length > 1 ? `chunk-${i + 1}` : 'full';
+    if (doneChunks.has(label)) {
+      options?.onProgress?.(`  Chunk ${i + 1}/${chunks.length} — cached, skipping`);
+      return; // already persisted from a previous run
+    }
+
     const chunkInfo: ChunkInfo | undefined =
       chunks.length > 1 ? { index: i + 1, total: chunks.length, allFileNames } : undefined;
 
-    if (chunkInfo) {
-      options?.onProgress?.(
-        `Analyzing chunk ${i + 1}/${chunks.length} of ${service.name} (${chunks[i].length} files)...`,
-      );
-    }
+    options?.onProgress?.(`  Chunk ${i + 1}/${chunks.length} (${chunk.length} files)...`);
 
-    const chunkService: DiscoveredService = { ...service, rsFiles: chunks[i] };
+    const chunkService: DiscoveredService = { ...service, rsFiles: chunk };
     const result = await runAnalysisCall(
       chunkService,
       externalTypes,
@@ -219,30 +264,139 @@ export async function analyzeService(
       options,
       chunks.length > 1 ? `${service.name} chunk ${i + 1}/${chunks.length}` : service.name,
     );
-    partialResults.push(result);
-  }
 
-  // Step 4: Merge if chunked, otherwise return directly
-  if (chunks.length === 1) return partialResults[0];
+    // Persist artifact — independently retryable
+    await writeArtifact(slug, 'structure', label, result);
+    options?.onProgress?.(`  Chunk ${i + 1} → artifact saved`);
+  });
 
-  const merged = mergePartialResults(partialResults);
+  await runParallel(chunkTasks, PHASE_CONCURRENCY);
 
-  // Step 5: Generate traces in a separate pass now that the full call graph is available
-  options?.onProgress?.(`Generating traces for ${service.name} from merged call graph...`);
-  try {
-    const { system, user } = buildTracesOnlyPrompt(
-      service.name,
-      merged.nodes.map((n) => ({ ...n, description: n.description ?? '' })),
-      merged.edges,
+  // Aggregate all structure artifacts
+  const structureArtifacts = await readArtifacts(slug, 'structure');
+  const merged = aggregateStructure(structureArtifacts);
+  if (!merged) throw new Error(`Phase 1 produced no results for ${service.name}`);
+
+  options?.onProgress?.(
+    `Phase 1 complete: ${merged.nodes.length} nodes, ${merged.edges.length} edges`,
+  );
+
+  // ── Phase 2: Output cases + input schemas (parallel per entry, persisted) ──
+  const subgraphs = extractEntrySubgraphs(merged.nodes, merged.edges);
+  const SKIP_KINDS = new Set(['struct', 'enum']);
+  const nodeMap = new Map(merged.nodes.map((n) => [n.id, n]));
+
+  if (subgraphs.length > 0) {
+    const doneOC = await completedEntries(slug, 'output_cases');
+
+    options?.onProgress?.(
+      `Phase 2: ${subgraphs.length} entry point(s), ${doneOC.size} already done — generating output_cases...`,
     );
-    const jsonStr = await chat({ system, user });
-    const parsed = JSON.parse(jsonStr);
-    if (Array.isArray(parsed.traces)) {
-      merged.traces = parsed.traces;
-    }
-  } catch {
-    // Non-fatal — merged result still has nodes/edges, traces just stay empty
+
+    const phase2Tasks = subgraphs.map((sg) => async () => {
+      if (doneOC.has(sg.entryId)) {
+        options?.onProgress?.(
+          `  ${nodeMap.get(sg.entryId)?.name || sg.entryId} — cached, skipping`,
+        );
+        return;
+      }
+
+      const sgNodes = merged.nodes.filter((n) => sg.nodeIds.has(n.id) && !SKIP_KINDS.has(n.kind));
+      const sgEdges = merged.edges.filter((e) => sg.nodeIds.has(e.from) && sg.nodeIds.has(e.to));
+      if (sgNodes.length === 0) return;
+
+      const entryNode = nodeMap.get(sg.entryId);
+      options?.onProgress?.(`  output_cases for ${entryNode?.name || sg.entryId}...`);
+
+      try {
+        const { system, user } = buildOutputCasesPrompt(
+          service.name,
+          sgNodes.map((n) => ({
+            id: n.id,
+            kind: n.kind,
+            name: n.name,
+            description: n.description ?? '',
+            input: n.input,
+            output: n.output,
+            source_code: n.source_code,
+          })),
+          sgEdges,
+        );
+        const jsonStr = await chat({ system, user });
+        const parsed = JSON.parse(jsonStr);
+
+        await writeArtifact(slug, 'output_cases', sg.entryId, parsed);
+        options?.onProgress?.(`  ${entryNode?.name || sg.entryId} → artifact saved`);
+      } catch (err) {
+        options?.onProgress?.(
+          `  Warning: output_cases failed for ${sg.entryId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    });
+
+    await runParallel(phase2Tasks, PHASE_CONCURRENCY);
+
+    // Aggregate and attach to nodes
+    const ocArtifacts = await readArtifacts(slug, 'output_cases');
+    aggregateOutputCases(merged.nodes, ocArtifacts);
+
+    options?.onProgress?.(
+      `Phase 2 complete: ${merged.nodes.filter((n) => n.output_cases?.length).length} nodes with output_cases`,
+    );
   }
+
+  // ── Phase 3: Traces (parallel per entry, persisted) ──
+  if (subgraphs.length > 0) {
+    const doneTraces = await completedEntries(slug, 'traces');
+
+    options?.onProgress?.(
+      `Phase 3: ${subgraphs.length} entry point(s), ${doneTraces.size} already done — generating traces...`,
+    );
+
+    const phase3Tasks = subgraphs.map((sg) => async () => {
+      if (doneTraces.has(sg.entryId)) {
+        options?.onProgress?.(
+          `  ${nodeMap.get(sg.entryId)?.name || sg.entryId} — cached, skipping`,
+        );
+        return;
+      }
+
+      const sgNodes = merged.nodes.filter((n) => sg.nodeIds.has(n.id));
+      const sgEdges = merged.edges.filter((e) => sg.nodeIds.has(e.from) && sg.nodeIds.has(e.to));
+      if (sgNodes.length === 0) return;
+
+      const entryNode = nodeMap.get(sg.entryId);
+      options?.onProgress?.(`  traces for ${entryNode?.name || sg.entryId}...`);
+
+      try {
+        const { system, user } = buildTracesOnlyPrompt(
+          service.name,
+          sgNodes.map((n) => ({ ...n, description: n.description ?? '' })),
+          sgEdges,
+        );
+        const jsonStr = await chat({ system, user });
+        const parsed = JSON.parse(jsonStr);
+
+        await writeArtifact(slug, 'traces', sg.entryId, parsed);
+        options?.onProgress?.(`  ${entryNode?.name || sg.entryId} → artifact saved`);
+      } catch (err) {
+        options?.onProgress?.(
+          `  Warning: traces failed for ${sg.entryId}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    });
+
+    await runParallel(phase3Tasks, PHASE_CONCURRENCY);
+
+    // Aggregate traces
+    const traceArtifacts = await readArtifacts(slug, 'traces');
+    merged.traces = aggregateTraces(traceArtifacts);
+
+    options?.onProgress?.(`Phase 3 complete: ${merged.traces.length} traces generated`);
+  }
+
+  // Clean up intermediate artifacts
+  await cleanupArtifacts(slug);
 
   return merged;
 }

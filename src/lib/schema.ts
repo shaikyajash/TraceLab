@@ -59,6 +59,27 @@ export interface ServiceInfo {
   description: string;
 }
 
+/** Describes one expected field in a node's input — used for deterministic validation. */
+export interface InputFieldSchema {
+  /** Dot-notation path: "url", "chains[0].name", "headers.Authorization" */
+  field: string;
+  /** Expected JS typeof: "string", "number", "boolean", "object", "array" */
+  type: 'string' | 'number' | 'boolean' | 'object' | 'array';
+  /** If true, simulation returns a precise error when this field is missing */
+  required: boolean;
+  /** Human-readable label for error messages, e.g. "executor URL" */
+  description?: string;
+  /** For string fields: regex pattern the value must match (e.g. "^https?://", "^[0-9a-f]{64}$") */
+  pattern?: string;
+  /** For string fields: list of allowed values */
+  enum?: string[];
+  /** EXACT error message from source code to return on validation failure.
+   *  e.g. "At least one chain must be provided" — copied verbatim from the Rust source. */
+  error_message?: string;
+  /** HTTP status code or error code from source (e.g. 400, 422, "BAD_REQUEST") */
+  error_status?: number | string;
+}
+
 /** One output case for a node — first case where ALL match conditions pass wins.
  *  If no cases match (or output_cases is absent), falls back to example_output ?? inputPayload. */
 export interface NodeOutputCase {
@@ -107,6 +128,9 @@ export interface ComponentNode {
   example_output?: Record<string, unknown> | null;
   /** Conditional output cases — resolved deterministically from the input payload at simulation time */
   output_cases?: NodeOutputCase[];
+  /** Input schema for deterministic validation — checked BEFORE output_cases.
+   *  If any field fails validation, simulation returns a precise error and terminates. */
+  input_schema?: InputFieldSchema[];
   port?: number;
 }
 

@@ -1,4 +1,4 @@
-import { ComponentNode, SimulationStep } from './schema';
+import { ComponentNode, InputFieldSchema, SimulationStep } from './schema';
 import { matchesAll } from './conditions';
 
 export interface ResolvedOutput {
@@ -45,29 +45,171 @@ function mergeInputIntoOutput(template: unknown, input: unknown): unknown {
       iVal !== null &&
       !Array.isArray(iVal)
     ) {
-      // Recurse into nested objects
       result[key] = mergeInputIntoOutput(tVal, iVal);
     } else if (!Array.isArray(tVal)) {
-      // Replace scalar/primitive with actual input value
       result[key] = iVal;
     }
-    // Arrays: keep template value (structure comes from the template)
   }
 
   return result;
 }
 
+// ─── Input schema validation ────────────────────────────────────────
+
+/** Navigate a dot-notation + bracket path to get a nested value */
+function getFieldValue(payload: unknown, field: string): unknown {
+  const parts = field.replace(/\[(\d+)\]/g, '.$1').split('.');
+  let current: unknown = payload;
+  for (const part of parts) {
+    if (current === null || current === undefined || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+function getActualType(value: unknown): string {
+  if (value === null || value === undefined) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+}
+
+interface SchemaValidationError {
+  field: string;
+  expected: string;
+  actual: string;
+  /** The error message — uses error_message from source code when available, generic fallback otherwise */
+  message: string;
+  /** HTTP status / error code from source if specified */
+  status?: number | string;
+}
+
+/**
+ * Validate input against a node's input_schema. Returns null if valid,
+ * or a precise error describing the first failing field.
+ *
+ * When input_schema fields have `error_message`, it uses the EXACT error string
+ * from the source code (e.g. "At least one chain must be provided") instead of
+ * generating a generic message.
+ */
+function validateInputSchema(
+  input: unknown,
+  schema: InputFieldSchema[],
+): SchemaValidationError | null {
+  // First: input must be an object (not null, not array, not primitive)
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return {
+      field: '(root)',
+      expected: 'object',
+      actual: getActualType(input),
+      message: `Expected input to be a JSON object, got ${getActualType(input)}`,
+    };
+  }
+
+  for (const fieldDef of schema) {
+    const value = getFieldValue(input, fieldDef.field);
+    const label = fieldDef.description || fieldDef.field;
+    // Use exact source error message when available, otherwise build a generic one
+    const srcError = fieldDef.error_message;
+    const status = fieldDef.error_status;
+
+    // Required check
+    if (fieldDef.required && (value === undefined || value === null)) {
+      return {
+        field: fieldDef.field,
+        expected: fieldDef.type,
+        actual: 'missing',
+        message: srcError || `Missing required field: "${label}"`,
+        status,
+      };
+    }
+
+    // Skip further checks if field is absent and not required
+    if (value === undefined || value === null) continue;
+
+    // Type check
+    const actualType = getActualType(value);
+    if (actualType !== fieldDef.type) {
+      return {
+        field: fieldDef.field,
+        expected: fieldDef.type,
+        actual: actualType,
+        message: srcError || `Field "${label}" must be ${fieldDef.type}, got ${actualType}`,
+        status,
+      };
+    }
+
+    // Enum check (allowed values)
+    if (fieldDef.enum && fieldDef.enum.length > 0 && typeof value === 'string') {
+      if (!fieldDef.enum.includes(value)) {
+        return {
+          field: fieldDef.field,
+          expected: `one of [${fieldDef.enum.join(', ')}]`,
+          actual: String(value),
+          message:
+            srcError ||
+            `Field "${label}" has invalid value "${value}". Expected: ${fieldDef.enum.join(', ')}`,
+          status,
+        };
+      }
+    }
+
+    // Pattern check (regex for strings)
+    if (fieldDef.pattern && typeof value === 'string') {
+      try {
+        const regex = new RegExp(fieldDef.pattern);
+        if (!regex.test(value)) {
+          return {
+            field: fieldDef.field,
+            expected: `string matching ${fieldDef.pattern}`,
+            actual: String(value),
+            message: srcError || `Field "${label}" does not match expected format`,
+            status,
+          };
+        }
+      } catch {
+        // Invalid regex in schema — skip pattern check
+      }
+    }
+  }
+
+  return null;
+}
+
+// ─── Main resolution ────────────────────────────────────────────────
+
 export function resolveNodeOutput(node: ComponentNode, inputPayload: unknown): ResolvedOutput {
+  // Phase 1: Validate against input_schema — repo-accurate error messages
+  if (node.input_schema && node.input_schema.length > 0) {
+    const schemaError = validateInputSchema(inputPayload, node.input_schema);
+    if (schemaError) {
+      return {
+        output: {
+          ok: false,
+          error: schemaError.message,
+          ...(schemaError.status != null ? { status: schemaError.status } : {}),
+          validation: {
+            field: schemaError.field,
+            expected: schemaError.expected,
+            actual: schemaError.actual,
+          },
+        },
+        terminates: true,
+        explanation: `Input validation failed: ${schemaError.message}`,
+      };
+    }
+  }
+
+  // Phase 2: Evaluate output_cases — business logic branching
   if (node.output_cases && node.output_cases.length > 0) {
     for (const c of node.output_cases) {
       if (matchesAll(c.match, inputPayload)) {
-        // Merge actual input values into the output template so user-provided
-        // values (e.g. "arbitrum") flow through instead of hardcoded examples.
         const output = mergeInputIntoOutput(c.output, inputPayload);
         return { output, terminates: !!c.terminates, explanation: c.explanation };
       }
     }
   }
+
+  // Phase 3: Fallback
   return { output: node.example_output ?? inputPayload, terminates: false };
 }
 

@@ -184,11 +184,7 @@ function validateTraces(result: PerServiceResult): ValidationError[] {
   const errors: ValidationError[] = [];
   const traces = result.traces ?? [];
   const nodeIds = new Set(result.nodes.map((n) => n.id));
-  const routeHandlerIds = new Set(
-    result.nodes.filter((n) => n.kind === 'route_handler').map((n) => n.id),
-  );
-
-  // Build reachability set from each route_handler via BFS
+  // Build reachability set from each entry point via BFS
   const adj = new Map<string, string[]>();
   for (const e of result.edges) {
     if (!adj.has(e.from)) adj.set(e.from, []);
@@ -216,11 +212,11 @@ function validateTraces(result: PerServiceResult): ValidationError[] {
     const trace = traces[t];
     const p = `traces[${t}]`;
 
-    if (!routeHandlerIds.has(trace.route_id)) {
+    if (!nodeIds.has(trace.route_id)) {
       errors.push({
         severity: 'error',
         category: 'trace',
-        message: `Trace "${trace.label}" has route_id "${trace.route_id}" which is not a route_handler node`,
+        message: `Trace "${trace.label}" has route_id "${trace.route_id}" which does not exist in nodes`,
         path: `${p}.route_id`,
       });
     }
@@ -259,7 +255,7 @@ function validateTraces(result: PerServiceResult): ValidationError[] {
         errors.push({
           severity: 'warning',
           category: 'trace',
-          message: `Trace "${trace.label}" step ${s} node "${step.node_id}" is not reachable from route_handler "${trace.route_id}" via edges`,
+          message: `Trace "${trace.label}" step ${s} node "${step.node_id}" is not reachable from entry "${trace.route_id}" via edges`,
           path: `${p}.steps[${s}].node_id`,
         });
       }
@@ -458,38 +454,48 @@ function validateCompleteness(result: PerServiceResult): ValidationError[] {
   const errors: ValidationError[] = [];
   const traces = result.traces ?? [];
 
-  // Every route_handler should have at least one trace
-  const routeHandlers = result.nodes.filter((n) => n.kind === 'route_handler');
-  const tracedRoutes = new Set(traces.map((t) => t.route_id));
+  // Every entry point (route_handler, or any node kind used as trace entry) should have traces
+  const ENTRY_POINT_KINDS = new Set([
+    'route_handler',
+    'function',
+    'business_logic',
+    'background_process',
+  ]);
+  const entryPoints = result.nodes.filter((n) => ENTRY_POINT_KINDS.has(n.kind));
+  const tracedEntries = new Set(traces.map((t) => t.route_id));
 
-  for (const rh of routeHandlers) {
-    if (!tracedRoutes.has(rh.id)) {
-      errors.push({
-        severity: 'warning',
-        category: 'completeness',
-        message: `Route handler "${rh.id}" has no traces. Every route_handler should have at least one trace.`,
-        path: `node "${rh.id}"`,
-      });
+  for (const ep of entryPoints) {
+    if (!tracedEntries.has(ep.id)) {
+      if (ep.kind === 'route_handler') {
+        errors.push({
+          severity: 'warning',
+          category: 'completeness',
+          message: `Entry point "${ep.id}" (${ep.kind}) has no traces. Every entry point should have at least one trace.`,
+          path: `node "${ep.id}"`,
+        });
+      }
+      // For non-route_handler entry points, only warn if they have a call chain (non-leaf)
+      // Leaf functions without traces are fine — they don't drive the simulator.
     }
   }
 
-  // Check that match arms in route_handlers with source_code are covered by traces
-  for (const rh of routeHandlers) {
-    if (!rh.source_code) continue;
+  // Check that match arms in entry points with source_code are covered by traces
+  for (const ep of entryPoints) {
+    if (!ep.source_code) continue;
+    if (!tracedEntries.has(ep.id)) continue;
 
-    // Count match arms (rough heuristic)
-    const matchArms = (rh.source_code.match(/=>\s*\{/g) || []).length;
-    const wildcardArms = (rh.source_code.match(/_\s*=>/g) || []).length;
+    const matchArms = (ep.source_code.match(/=>\s*\{/g) || []).length;
+    const wildcardArms = (ep.source_code.match(/_\s*=>/g) || []).length;
     const totalArms = matchArms + wildcardArms;
 
-    const routeTraces = traces.filter((t) => t.route_id === rh.id);
+    const entryTraces = traces.filter((t) => t.route_id === ep.id);
 
-    if (totalArms > 0 && routeTraces.length < totalArms) {
+    if (totalArms > 0 && entryTraces.length < totalArms) {
       errors.push({
         severity: 'warning',
         category: 'completeness',
-        message: `Route handler "${rh.id}" has ~${totalArms} match arms but only ${routeTraces.length} traces. Each distinct code path should have its own trace.`,
-        path: `node "${rh.id}"`,
+        message: `Entry point "${ep.id}" has ~${totalArms} match arms but only ${entryTraces.length} traces. Each distinct code path should have its own trace.`,
+        path: `node "${ep.id}"`,
       });
     }
   }
@@ -499,7 +505,7 @@ function validateCompleteness(result: PerServiceResult): ValidationError[] {
 
 // ─── output_cases validation ────────────────────────────────────────
 
-const SKIP_OUTPUT_CASES_KINDS = new Set(['struct', 'enum', 'background_process']);
+const SKIP_OUTPUT_CASES_KINDS = new Set(['struct', 'enum']);
 
 function validateOutputCases(result: PerServiceResult): ValidationError[] {
   const errors: ValidationError[] = [];

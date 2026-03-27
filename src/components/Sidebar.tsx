@@ -135,6 +135,9 @@ export default function Sidebar(props: SidebarProps) {
   const traceFlowRef = useRef<HTMLDivElement>(null);
   const inspectorRef = useRef<HTMLDivElement>(null);
 
+  const selectedEntryNode = traceRouteId ? nodeById(traceRouteId) : undefined;
+  const isHttpEntry = selectedEntryNode?.kind === 'route_handler';
+
   const handleSimulate = () => {
     runSimulation();
     setTraceFlowOpen(true);
@@ -253,7 +256,17 @@ export default function Sidebar(props: SidebarProps) {
                     ? '#854F0B'
                     : traceMethod === 'DELETE'
                       ? '#993C1D'
-                      : '#534AB7',
+                      : traceMethod === 'FN'
+                        ? '#378ADD'
+                        : traceMethod === 'BIZ'
+                          ? '#1D9E75'
+                          : traceMethod === 'BG'
+                            ? '#9333EA'
+                            : traceMethod === 'MQ'
+                              ? '#EC4899'
+                              : traceMethod === 'RUN'
+                                ? '#F59E0B'
+                                : '#534AB7',
             }}
           >
             {traceMethod}
@@ -266,7 +279,7 @@ export default function Sidebar(props: SidebarProps) {
             }}
           >
             <SelectTrigger className="flex-1 bg-[#111114] border-[#2a2a2e] h-auto py-2 px-3 text-white text-[11px] hover:border-[#378ADD] focus:ring-0 focus:ring-offset-0">
-              <SelectValue placeholder="select route..." className="text-white" />
+              <SelectValue placeholder="select entry point..." className="text-white" />
             </SelectTrigger>
             <SelectContent
               className="bg-[#111114] border-[#2a2a2e] text-white max-h-[300px] overflow-y-auto"
@@ -281,7 +294,9 @@ export default function Sidebar(props: SidebarProps) {
                   value={r.id}
                   className="text-[11px] text-white hover:bg-gray-200 hover:text-gray-900 focus:bg-gray-200 focus:text-gray-900 cursor-pointer data-highlighted:bg-gray-200 data-highlighted:text-gray-900"
                 >
-                  {r.path_pattern || r.name}
+                  {r.kind === 'route_handler'
+                    ? r.path_pattern || r.name
+                    : `${r.name}${r.input ? `(${r.input})` : ''}`}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -324,29 +339,23 @@ export default function Sidebar(props: SidebarProps) {
                 d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
               />
             </svg>
-            <h3 className="text-[13px] text-[#888] font-semibold mb-2">Select a Route</h3>
+            <h3 className="text-[13px] text-[#888] font-semibold mb-2">Select an Entry Point</h3>
             <p className="text-[11px] text-[#555] leading-relaxed max-w-[240px]">
-              Choose a route from the dropdown above to start simulating requests and exploring the
+              Choose an entry point from the dropdown above to start simulating and exploring the
               trace flow
             </p>
           </div>
         ) : (
           <>
-            {/* PARAMS SECTION */}
-            <CollapsibleSection
-              title="PARAMS"
-              isOpen={paramsOpen}
-              onToggle={() => setParamsOpen(!paramsOpen)}
-              badge={
-                routePathParams.length > 0 && (
-                  <span className="text-[#854F0B] ml-1.5">{routePathParams.length}</span>
-                )
-              }
-            >
-              {routePathParams.length === 0 ? (
-                <div className="text-[11px] text-[#555] py-2 text-center">No path parameters</div>
-              ) : (
-                routePathParams.map((param) => (
+            {/* PARAMS SECTION — only for HTTP route_handlers with path params */}
+            {isHttpEntry && routePathParams.length > 0 && (
+              <CollapsibleSection
+                title="PARAMS"
+                isOpen={paramsOpen}
+                onToggle={() => setParamsOpen(!paramsOpen)}
+                badge={<span className="text-[#854F0B] ml-1.5">{routePathParams.length}</span>}
+              >
+                {routePathParams.map((param) => (
                   <div key={param} className="mb-2">
                     <div className="text-[9px] text-[#854F0B] mb-1 font-semibold tracking-wide">
                       :{param}
@@ -361,20 +370,20 @@ export default function Sidebar(props: SidebarProps) {
                       className="w-full bg-[#111114] border-[0.5px] border-[#2a2a2e] rounded-md px-2.5 py-2 text-[#ddd] text-[11px] outline-none box-border"
                     />
                   </div>
-                ))
-              )}
-            </CollapsibleSection>
+                ))}
+              </CollapsibleSection>
+            )}
 
-            {/* BODY SECTION */}
+            {/* INPUT SECTION — "BODY" for HTTP, "INPUT" for everything else */}
             <CollapsibleSection
-              title="BODY"
+              title={isHttpEntry ? 'BODY' : 'INPUT'}
               isOpen={bodyOpen}
               onToggle={() => setBodyOpen(!bodyOpen)}
             >
               <textarea
                 value={reqBody}
                 onChange={(e) => setReqBody(e.target.value)}
-                placeholder='{"action": "Generate", ...}'
+                placeholder={isHttpEntry ? '{"action": "Generate", ...}' : '{"arg1": "value", ...}'}
                 spellCheck={false}
                 className="w-full min-h-[120px] bg-[#111114] border-[0.5px] border-[#2a2a2e] rounded-md p-2.5 text-[#ddd] text-[11px] outline-none box-border resize-y leading-relaxed mb-1"
               />

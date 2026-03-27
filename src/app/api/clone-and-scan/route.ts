@@ -201,6 +201,7 @@ export async function POST(request: NextRequest) {
               });
               const result = await analyzeService(service, {
                 workspacePath: clonePath,
+                slug: `${slug}-${service.name}`,
                 onProgress: (msg) =>
                   send({ phase: 'analyzing', message: `[${service.name}] ${msg}` }),
               });

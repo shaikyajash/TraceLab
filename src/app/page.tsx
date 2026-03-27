@@ -225,10 +225,15 @@ export default function Home() {
     return graph.edges.filter((e) => coreNodeIds.has(e.from) && coreNodeIds.has(e.to));
   }, [graph, coreNodeIds]);
 
-  /* routes for sidebar */
+  /* entry points for sidebar — any node that is the entry of at least one trace */
   const routes = useMemo(() => {
+    const traceEntryIds = new Set(graph?.traces?.map((t) => t.route_id) ?? []);
+    if (traceEntryIds.size > 0) {
+      return coreNodes.filter((n) => traceEntryIds.has(n.id));
+    }
+    // Fallback: if no traces, show route_handlers
     return coreNodes.filter((n) => n.kind === 'route_handler');
-  }, [coreNodes]);
+  }, [coreNodes, graph]);
 
   /* extract path params from selected route pattern */
   const routePathParams = useMemo(() => {
@@ -246,25 +251,51 @@ export default function Home() {
     const node = coreNodes.find((n) => n.id === traceRouteId);
     if (!node) return;
 
-    if (node.method) {
-      setTraceMethod(node.method.toUpperCase());
+    if (node.kind === 'route_handler') {
+      // HTTP entry point — extract method from node or id
+      if (node.method) {
+        setTraceMethod(node.method.toUpperCase());
+      } else {
+        const idUpper = node.id.toUpperCase();
+        if (idUpper.startsWith('GET ')) setTraceMethod('GET');
+        else if (idUpper.startsWith('POST ')) setTraceMethod('POST');
+        else if (idUpper.startsWith('PUT ')) setTraceMethod('PUT');
+        else if (idUpper.startsWith('DELETE ')) setTraceMethod('DELETE');
+        else if (idUpper.startsWith('PATCH ')) setTraceMethod('PATCH');
+        else setTraceMethod('GET');
+      }
     } else {
-      const idUpper = node.id.toUpperCase();
-      if (idUpper.startsWith('GET ')) setTraceMethod('GET');
-      else if (idUpper.startsWith('POST ')) setTraceMethod('POST');
-      else if (idUpper.startsWith('PUT ')) setTraceMethod('PUT');
-      else if (idUpper.startsWith('DELETE ')) setTraceMethod('DELETE');
-      else if (idUpper.startsWith('PATCH ')) setTraceMethod('PATCH');
+      // Non-HTTP entry point — use kind as the "method" badge
+      setTraceMethod(
+        node.kind === 'function'
+          ? 'FN'
+          : node.kind === 'business_logic'
+            ? 'BIZ'
+            : node.kind === 'background_process'
+              ? 'BG'
+              : node.kind === 'message_queue'
+                ? 'MQ'
+                : 'RUN',
+      );
     }
 
+    // Populate input body: prefer example_payload (HTTP), fall back to example_input (any entry)
     if (node.example_payload) {
       try {
         setReqBody(JSON.stringify(JSON.parse(node.example_payload), null, 2));
       } catch {
         setReqBody(node.example_payload);
       }
+    } else if (node.example_input) {
+      setReqBody(JSON.stringify(node.example_input, null, 2));
     } else {
-      setReqBody('{\n  \n}');
+      // Check if first trace for this entry has an example_payload
+      const firstTrace = graph?.traces?.find((t) => t.route_id === node.id);
+      if (firstTrace?.example_payload) {
+        setReqBody(JSON.stringify(firstTrace.example_payload, null, 2));
+      } else {
+        setReqBody('{\n  \n}');
+      }
     }
 
     const init: Record<string, string> = {};

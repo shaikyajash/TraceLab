@@ -76,13 +76,26 @@ RULE 2 — NODE KINDS (use exact values)
   struct             Data-carrying struct
   enum               Enum (especially serde-deserialized ones)
   message_queue      Async messaging
-  function           Utility that doesn't fit above
-  background_process Long-running loop or spawned task NOT tied to an HTTP route
+  function           Utility / public API function / CLI command handler
+  background_process Long-running loop or spawned task
                      (e.g. tokio::spawn loops, screening services, engine runners,
-                      cron-style workers, status watchers). Use this instead of
-                      business_logic when the component runs independently of any
-                      incoming request. These nodes appear in the graph but do NOT
-                      need a trace (they are never the entry point of an HTTP request).
+                      cron-style workers, status watchers, main() run loops)
+
+  ENTRY POINTS — nodes that can be the starting point of a trace:
+    - route_handler:      HTTP endpoints (most common for web services)
+    - function:           Public API functions, CLI subcommand handlers, main() entry,
+                          library entry points (pub fn), gRPC method handlers
+    - business_logic:     Top-level orchestrators called from main() or external triggers
+    - background_process: If the process has meaningful internal call chains worth tracing
+    - message_queue:      Message/event consumers that trigger processing pipelines
+
+  Not every service is an HTTP server. Identify the ACTUAL entry points:
+    - HTTP server → route_handlers
+    - CLI tool → function nodes for each subcommand
+    - Library → function nodes for each public API method
+    - Worker/daemon → business_logic or background_process for the main loop
+    - gRPC/WebSocket → function nodes for each method/handler
+    - Message consumer → message_queue nodes for each topic/handler
 
 Id rules:
   - route_handler → "GET /health", "POST /api/items/{id}"
@@ -217,17 +230,27 @@ its output, step 4 CANNOT access it — it does not exist. The chain is a pure d
 ╚══════════════════════════════════════════════════════════════════╝
 
 WHEN TO ADD output_cases:
-  Add output_cases on every node whose output can vary (any node that appears in a trace
-  except struct/enum/background_process). Add as many cases as the node's actual logic
-  requires — one per distinct code path through the function.
-  - struct / enum / background_process: SKIP — they have no dynamic output
-  - If a node truly always returns the same value regardless of input, use example_output.
+  Add output_cases on EVERY node that appears in a trace. This includes:
+  - route_handler, middleware, business_logic, validator, transformer, function
+  - db_call, external_http_call: return MOCK data via output_cases (there is no real DB/API)
+  - background_process: if it appears as an entry point or step in a trace, it NEEDS output_cases
+  - message_queue: same — if traced, it needs output_cases
+  Add as many cases as the node's actual logic requires.
+  SKIP only: struct, enum (they are type definitions, not executable steps)
+  If a node truly always returns the same value regardless of input, use example_output.
+
+  CRITICAL — external_http_call / db_call in simulation:
+    There is NO real network, NO real database. These nodes MUST return mock data via output_cases.
+    The mock data should be realistic: use the node's actual return type with plausible values.
+    For a db_call that returns Vec<Order>, the success output_case should include actual mock orders.
+    For an external_http_call that fetches data, the output_case IS the mock response.
+    Different inputs should produce different mock outputs — use match conditions to distinguish.
 
 ╔══════════════════════════════════════════════════════════════════╗
-║  CRITICAL — CHAIN-AWARE CONDITIONS                              ║
+║  CRITICAL — CHAIN-AWARE CONDITIONS                               ║
 ║                                                                  ║
 ║  output_cases are evaluated against the INPUT payload flowing    ║
-║  INTO that node — which is the PREVIOUS step's OUTPUT, NOT the  ║
+║  INTO that node — which is the PREVIOUS step's OUTPUT, NOT the   ║
 ║  original request body.                                          ║
 ║                                                                  ║
 ║  Before writing output_cases for a node, ask:                    ║
@@ -242,10 +265,10 @@ WHEN TO ADD output_cases:
 ║    → business_logic outputs: {"result": {...}} or {"error": ..}  ║
 ║    → db_call receives THAT, checks "result" field                ║
 ║                                                                  ║
-║  WRONG: db_call checking {"field": "action", "op": "eq", ...}   ║
+║  WRONG: db_call checking {"field": "action", "op": "eq", ...}    ║
 ║         — "action" is in the request body, not in what db_call   ║
 ║           receives from business_logic                           ║
-║  RIGHT: db_call checking {"field": "result", "op": "exists"}    ║
+║  RIGHT: db_call checking {"field": "result", "op": "exists"}     ║
 ║         — "result" is what business_logic actually outputs       ║
 ╚══════════════════════════════════════════════════════════════════╝
 
@@ -357,36 +380,108 @@ RULE 8 — TRACES (most critical section)
 
 Traces are the ONLY thing that drives the visual flow simulator. Without complete traces, the simulator shows nothing.
 
-STEP 1 — For EVERY route_handler, trace execution from entry all the way to the final response.
+STEP 1 — For EVERY entry point, trace execution from entry all the way to the final output.
+
+  Entry points are NOT just HTTP route_handlers. Identify ALL of them:
+    - HTTP server → every route_handler
+    - CLI tool → every subcommand handler (function node)
+    - Library → every public API method (function node)
+    - Worker/daemon → the main processing loop (business_logic / background_process)
+    - gRPC/WebSocket → every method handler (function node)
+    - Message consumer → every topic handler (message_queue / function node)
 
   Think like a debugger stepping through the code:
-    route_handler receives request
-      → calls middleware / auth check
+    entry_point receives input (request body, CLI args, message payload, function args, config)
+      → calls middleware / auth check (if any)
         → calls business_logic fn
           → calls validator
-          → calls db_call  ← keep going
-          → calls external_adapter  ← keep going
-            → external service responds
+          → calls db_call  ← keep going (returns MOCK data)
+          → calls external_http_call  ← keep going (returns MOCK response)
+          → evaluates conditions / classifies results
           → returns result
         → business_logic returns
-      → route_handler sends HTTP response  ← this is the end
+      → entry_point produces final output  ← this is the end
 
   Every function visited in that walk = one step. Do NOT stop at any intermediate node.
-  If a route internally calls another route, continue tracing through THAT route's
-  full downstream chain too — all the way to its leaf nodes.
+  If an entry point internally calls another entry point, continue tracing through
+  its full downstream chain too — all the way to its leaf nodes.
+
+  ══════════════════════════════════════════════
+  MODELING NON-SERVER EXECUTION CONTEXTS
+  ══════════════════════════════════════════════
+
+  The simulation model is NOT limited to HTTP request/response. It is a UNIFIED EXECUTION
+  MODEL that works for any code path. The key principle:
+
+    input → step 1 → step 2 → ... → output
+    (any change in input produces a predictable change in output)
+
+  For scripts, cron jobs, background services, and monitors:
+
+  A) ENTRY POINT INPUT = initial state
+     For an HTTP handler: the request body
+     For a cron job / monitor: the CONFIG + THRESHOLDS + MOCK EXTERNAL STATE
+     For a CLI tool: the CLI arguments + flags
+     For a message consumer: the message payload
+
+     Example — Order Monitor:
+       entry input: {"config": {"delay_threshold_s": 300}, "fetched_orders": [...mock orders...]}
+
+     The "fetched_orders" are MOCK data that the simulator uses instead of calling a real API.
+     The user can edit these mock values to test different scenarios.
+
+  B) EXTERNAL CALLS = MOCK DATA SOURCES
+     db_call and external_http_call nodes MUST return mock data via output_cases.
+     The mock data is the "simulated external state" — it replaces the real DB/API.
+
+     Example — fetch_pending_orders (external_http_call):
+       input_schema: [{"field": "chain", "type": "string", "required": true}]
+       output_cases:
+         match [chain exists]: {"ok": true, "orders": [{"id": "order-1", "status": "pending", "age_s": 450}]}
+         catch-all: {"ok": false, "error": "Failed to fetch orders"}
+
+     The user can edit the mock orders to test different scenarios:
+       - Change age_s to 100 → order is within threshold → no alert
+       - Change age_s to 600 → order exceeds threshold → delayed alert
+       - Remove orders array → fetch failure → error path
+
+  C) EVALUATION / CLASSIFICATION STEPS
+     Business logic that classifies results should produce CATEGORIZED outputs:
+
+     Example — evaluate_orders (business_logic):
+       input_schema: [{"field": "orders", "type": "array", "required": true},
+                       {"field": "config.delay_threshold_s", "type": "number", "required": true}]
+       output_cases:
+         match [orders[0].age_s > threshold equivalent]:
+           {"delayed": [{"id": "order-1", "age_s": 450}], "ok": [], "invalid": []}
+         match [orders[0] exists, all within threshold]:
+           {"delayed": [], "ok": [{"id": "order-1"}], "invalid": []}
+         match [orders is empty array]:
+           {"delayed": [], "ok": [], "invalid": [], "note": "No orders to evaluate"}
+         catch-all:
+           {"error": "Evaluation failed — invalid input"}, terminates: true
+
+  D) EVERY PATH IS A TRACE
+     A monitor that checks for delayed orders has MULTIPLE distinct paths:
+       Trace 1: "Normal — all orders within threshold" → no alerts
+       Trace 2: "Delayed orders detected" → alert generated
+       Trace 3: "Fetch failure" → error logged
+       Trace 4: "No pending orders" → idle / skip
+
+     Each produces a DIFFERENT structured output. Not a generic log message.
 
   Two paths are distinct if they visit DIFFERENT nodes:
     - match arms dispatching to different functions
     - if/else calling different components
     - Option/Result that short-circuits on None/Err
-    - Path parameter dispatch (/{action} → different handler per value)
+    - Path parameter / CLI flag dispatch
     - Auth role dispatch (admin vs user)
     - Cached vs uncached path
 
 STEP 2 — Write one trace per distinct path. Most-specific FIRST, catch-alls LAST.
 
   Trace fields:
-    route_id         route_handler node id
+    route_id         entry point node id (route_handler, function, business_logic, etc.)
     label            human name including the distinguishing condition
     description      one line: what this path does and how it ends
     example_payload  JSON object (NOT a string) that triggers this exact path
@@ -394,10 +489,10 @@ STEP 2 — Write one trace per distinct path. Most-specific FIRST, catch-alls LA
     steps            complete end-to-end list — see below
 
   STEPS — follow every edge until you hit a true leaf (no outgoing edges):
-    step 1 : the route_handler itself
+    step 1 : the entry point itself (route_handler, function, business_logic, etc.)
     step 2 : first node it calls
     step 3 : what that node calls
-    ... keep going until the final db_call / external_http_call
+    ... keep going until the final db_call / external_http_call / leaf function
 
     Self-check before finalizing: for every step, look at its outgoing edges.
     If any target is NOT already a later step, you stopped too early — add it.
@@ -735,7 +830,8 @@ EXAMPLE CHAIN FLOW (read top-to-bottom — each node's output becomes the next n
 All files in this service: ${chunkInfo.allFileNames.join(', ')}
 You are only seeing a SUBSET of files in this chunk. Extract only what is defined in these files.
 Do NOT invent nodes or edges for files you cannot see. Other chunks will cover them.
-IMPORTANT: Set "traces": [] — do NOT generate traces in chunked mode. Traces will be generated separately after all chunks are merged, once the full call graph is available.
+IMPORTANT: Set "output_cases": null on ALL nodes — output_cases will be generated in a separate pass after all chunks are merged, when the full call graph is available.
+IMPORTANT: Set "traces": [] — traces will also be generated separately after merging.
 Still output a complete, valid JSON object for all other fields.
 
 `
@@ -745,8 +841,8 @@ Still output a complete, valid JSON object for all other fields.
 
 BEFORE writing any output, do this analysis mentally:
   1. Read every file completely.
-  2. Trace every call chain: route handlers → business logic → validators/transformers → db_calls.
-  3. Identify every branch point in every handler (match arms, if/else, flags, Option/Result).
+  2. Trace every call chain: entry points (route handlers, public functions, CLI handlers, main loops) → business logic → validators/transformers → db_calls.
+  3. Identify every branch point in every entry point and handler (match arms, if/else, flags, Option/Result).
   4. List all enums used in serde deserialization and confirm their serde-serialized variant values.
 
 THEN produce the complete JSON object. Do not truncate. Do not stop early.
@@ -782,8 +878,10 @@ ${`═════════════════════════�
 TRACE RULES
 ══════════════════════════════════════════════
 
-STEP 1 — Build the full call tree for EVERY route_handler node:
-  Start at the route_handler. Follow every edge outward recursively.
+STEP 1 — Build the full call tree for EVERY entry point node:
+  Entry points = route_handler, public function, CLI handler, main loop, message consumer.
+  Not just HTTP routes — identify ALL nodes that are the starting point of a call chain.
+  Start at the entry point. Follow every edge outward recursively.
   Every reachable node IS a step. Do not stop at business_logic — keep following edges to db_calls, validators, etc.
 
   Self-check before finalizing each trace: for every step, look at its outgoing edges in the EDGES list.
@@ -795,13 +893,13 @@ STEP 2 — Write one trace per distinct execution path.
     - match arms dispatching to different functions
     - if/else calling different components
     - Option/Result that short-circuits on None/Err
-    - Path parameter dispatch (/{action} → different handler per value)
+    - Path parameter / CLI flag / input variant dispatch
     - Auth role dispatch
-  Look at the source_code of EVERY node to identify all branch points — not just the route handler.
+  Look at the source_code of EVERY node to identify all branch points — not just the entry point.
   Ordering: most-specific (has match conditions) FIRST, catch-all (match: []) LAST.
 
 STEPS — THE #1 RULE:
-  step 1: the route_handler itself
+  step 1: the entry point itself (route_handler, function, business_logic, etc.)
   step 2+: every node it calls, then every node those call, until leaf nodes (no outgoing edges)
   Cross-check: for each step's node_id, find its outgoing edges — those targets must also be steps.
 
@@ -859,11 +957,11 @@ STEP 6 — Path parameter dispatch:
   Add catch-all for unknown path param values.
 
 Trace fields:
-  route_id         route_handler node id
+  route_id         entry point node id (route_handler, function, business_logic, etc.)
   label            short name with distinguishing condition
   description      one line: what this path does and how it ends
   example_payload  JSON object (not string) that triggers this path
-  match            condition array. MAX ONE trace per route may use []. All others MUST have conditions.
+  match            condition array. MAX ONE trace per entry may use []. All others MUST have conditions.
   steps            complete ordered list (see above)
 
 Step fields:
@@ -875,25 +973,39 @@ Step fields:
 Condition format: {"field": "x", "op": "eq", "value": "y"}
 Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field, eq_type`}`;
 
-  const routeHandlers = nodes.filter((n) => n.kind === 'route_handler');
-  const otherNodes = nodes.filter((n) => n.kind !== 'route_handler');
+  // Entry points: nodes with outgoing edges but no incoming edges, or known entry kinds
+  const incomingNodes = new Set(edges.map((e) => e.to));
+  const ENTRY_KINDS = new Set(['route_handler', 'background_process']);
+  const entryPoints = nodes.filter(
+    (n) =>
+      ENTRY_KINDS.has(n.kind) || (!incomingNodes.has(n.id) && edges.some((e) => e.from === n.id)),
+  );
+  const entryIds = new Set(entryPoints.map((n) => n.id));
+  const otherNodes = nodes.filter((n) => !entryIds.has(n.id));
 
   const formatNode = (n: (typeof nodes)[0]) =>
     `[${n.kind}] id="${n.id}" name="${n.name}"\n  desc: ${n.description}${n.source_code ? `\n  source:\n${n.source_code}` : ''}${n.example_payload ? `\n  example_payload: ${n.example_payload}` : ''}`;
 
-  const nodesSummary = [...routeHandlers.map(formatNode), ...otherNodes.map(formatNode)].join(
-    '\n\n',
-  );
+  const nodesSummary = [
+    '── ENTRY POINTS (create traces for these) ──',
+    ...entryPoints.map(formatNode),
+    '',
+    '── OTHER NODES (referenced in traces as downstream steps) ──',
+    ...otherNodes.map(formatNode),
+  ].join('\n\n');
 
   const edgesSummary = edges.map((e) => `  ${e.from} → ${e.to}  (${e.payload})`).join('\n');
 
   const user = `Generate all execution traces for service "${serviceName}".
 
 BEFORE writing any output, do this analysis mentally:
-  1. For each route_handler, follow its outgoing edges recursively to build the full reachable node set.
+  1. For each ENTRY POINT (listed first below), follow its outgoing edges recursively to build the full reachable node set.
   2. Identify every branch point in every node's source_code (match arms, if/else, Option/Result paths).
   3. For each distinct execution path, list the exact sequence of node_ids from entry to leaf.
   4. Self-check: for every step in each trace, look at its outgoing edges in EDGES. If any target is NOT a later step, you stopped too early — add it.
+
+Entry points are NOT just HTTP route_handlers — they include any node that starts a call chain
+(public functions, CLI handlers, background processes, message consumers, etc.).
 
 NODES:
 ${nodesSummary}
@@ -901,7 +1013,252 @@ ${nodesSummary}
 EDGES (call graph):
 ${edgesSummary}
 
-Using the source_code and edges above, trace every route_handler through its full call chain. Return the JSON object with a "traces" array.`;
+Using the source_code and edges above, trace every entry point through its full call chain. Return the JSON object with a "traces" array.`;
+
+  return { system, user };
+}
+
+/**
+ * Phase 2 prompt: generate chain-aware output_cases for all nodes.
+ * Runs AFTER structure extraction (phase 1) when the full call graph is available.
+ */
+export function buildOutputCasesPrompt(
+  serviceName: string,
+  nodes: Array<{
+    id: string;
+    kind: string;
+    name: string;
+    description: string;
+    input?: string | null;
+    output?: string | null;
+    source_code?: string | null;
+  }>,
+  edges: Array<{ from: string; to: string; payload: string }>,
+): { system: string; user: string } {
+  const system = `You are generating output_cases for a visual flow simulator. There is NO runtime —
+each step ONLY receives the previous step's output. If step 3 doesn't include a field, step 4 can
+NEVER access it. output_cases define the COMPLETE simulated payload at each point in the chain.
+
+OUTPUT RULE: Your ENTIRE response must be ONE raw JSON object.
+First character: "{". Last character: "}". No markdown, no prose, no comments.
+
+Output shape:
+{
+  "output_cases": {
+    "<node_id>": [
+      {
+        "match": [{"field": "<f>", "op": "<op>", "value": "<v>"}],
+        "output": { ... },
+        "explanation": "...",
+        "terminates": false
+      },
+      {
+        "match": [],
+        "output": {"ok": false, "error": "..."},
+        "explanation": "catch-all",
+        "terminates": true
+      }
+    ]
+  },
+  "input_schemas": {
+    "<node_id>": [
+      {"field": "url", "type": "string", "required": true, "description": "executor URL", "pattern": "^https?://"},
+      {"field": "chains", "type": "array", "required": true, "description": "chain list"},
+      {"field": "chains[0].name", "type": "string", "required": true, "description": "chain name"},
+      {"field": "action", "type": "string", "required": false, "enum": ["create", "update", "delete"]}
+    ]
+  }
+}
+
+Both maps use node ids as keys.
+"output_cases" values = arrays of output_case objects.
+"input_schemas" values = arrays of field validation rules.
+Only include nodes that appear in call chains (skip struct and enum only).
+
+══════════════════════════════════════════════
+INPUT SCHEMA — DETERMINISTIC VALIDATION
+══════════════════════════════════════════════
+
+input_schema runs BEFORE output_cases. It validates the input structurally and returns
+the EXACT error message the real code would produce. The simulation must behave
+identically to the actual source code — not with generic messages.
+
+Field schema properties:
+  field          string   dot-notation path: "url", "chains[0].name", "headers.Authorization"
+  type           string   expected JS typeof: "string", "number", "boolean", "object", "array"
+  required       boolean  if true, simulation terminates with an error when missing
+  description    string   human-readable label (e.g. "executor URL")
+  pattern        string   (optional) regex for string validation (e.g. "^https?://", "^[0-9a-f]{64}$")
+  enum           array    (optional) list of allowed string values
+  error_message  string   EXACT error string from source code — copied verbatim from the Rust source.
+                          This is what the user sees in the simulation. NOT a generic message.
+  error_status   number|string  HTTP status code or error variant (e.g. 400, 422, "BAD_REQUEST")
+
+╔══════════════════════════════════════════════════════════════════╗
+║  ERROR MESSAGES MUST COME FROM THE SOURCE CODE                   ║
+║                                                                  ║
+║  Search the node's source_code for error strings:                ║
+║    Err(eyre!("..."))                                             ║
+║    return Err(Response::error("...", StatusCode::BAD_REQUEST))   ║
+║    bail!("...")                                                  ║
+║    anyhow!("...")                                                ║
+║    StatusCode::UNPROCESSABLE_ENTITY                              ║
+║    panic!("...")                                                 ║
+║                                                                  ║
+║  Copy those strings VERBATIM into error_message.                 ║
+║  Copy the status code into error_status.                         ║
+║                                                                  ║
+║  WRONG: error_message: "Missing required field: chains"          ║
+║  RIGHT: error_message: "At least one chain must be provided"     ║
+║         error_status: 400                                        ║
+║                                                                  ║
+║  WRONG: error_message: "Invalid value for action"                ║
+║  RIGHT: error_message: "Invalid request format: missing field    ║
+║         'chains' at line 1 column 30"                            ║
+║         error_status: 422                                        ║
+╚══════════════════════════════════════════════════════════════════╝
+
+HOW TO WRITE input_schema:
+  1. Read the node's source_code — find every validation check, guard clause, early return
+  2. For each check, extract: what field is checked, what type/format, what error is returned
+  3. Create one InputFieldSchema entry per check:
+     - field: the field being validated
+     - type: from the Rust type (String → "string", Vec<> → "array", bool → "boolean", etc.)
+     - required: true if the code errors when it's missing
+     - error_message: the EXACT error string from the source (Err("..."), bail!("..."), etc.)
+     - error_status: the HTTP status code or error kind from the source
+     - pattern: if the code validates format (regex, hex, URL, etc.)
+     - enum: if the code checks against a known set of values
+  4. IMPORTANT: input_schema fields must match what the PREVIOUS step outputs,
+     not the original request body (same chain-awareness as output_cases)
+  5. If no source_code is available, omit error_message (generic fallback will be used)
+
+══════════════════════════════════════════════
+THE SIMULATION CONTRACT
+══════════════════════════════════════════════
+
+1. Each step's output is the ONLY input the next step receives.
+2. There are no side channels — no globals, no shared state, no real HTTP calls.
+3. If a downstream step needs a field, EVERY step between the source and that step
+   MUST carry it forward in their success output.
+4. output_cases define the ACTUAL simulated payload — they are not summaries.
+
+══════════════════════════════════════════════
+HOW TO WRITE output_cases
+══════════════════════════════════════════════
+
+UNIFIED EXECUTION MODEL — applies to ALL node kinds equally:
+  route_handler, function, business_logic → process input, return structured result
+  middleware, validator → gate/transform input, pass or reject
+  db_call → return MOCK stored data (no real DB). Use realistic example records.
+  external_http_call → return MOCK API response (no real network). Use realistic payloads.
+  background_process → if traced, process input state (config + mock data), return categorized results
+  message_queue → process message payload, return acknowledgment or error
+
+  db_call / external_http_call are DATA SOURCES in simulation:
+    Their output_cases ARE the mock data. Different match conditions = different mock scenarios.
+    Example: a fetch_orders node could return 3 orders in one case, 0 in another, error in a third.
+    The user edits the input to select which scenario runs.
+
+STEP A — For each call chain (entry point → ... → leaf), map what each node:
+  - NEEDS as input (from source code / function signature)
+  - PRODUCES as output (from return type / source code)
+
+STEP B — Walk each chain forward. For each node's success output, include:
+  - Its OWN produced fields
+  - ALL fields that ANY later node in the chain needs (carry forward from input)
+
+STEP C — Write output_cases:
+  1. MATCH ON UPSTREAM: Conditions reference fields from the PREVIOUS step's output.
+  2. OUTPUT FOR DOWNSTREAM: Success output includes fields the NEXT step needs.
+  3. CARRY FORWARD: If step 5 needs "url" from step 1, steps 2-4 must all include "url".
+  4. ERROR CASES: Add "terminates": true on rejection/error outputs. The simulator
+     stops the chain there (e.g. auth failure, validation error, not-found).
+  5. CATCH-ALL: Optional match: [] as last case with "terminates": true.
+
+══════════════════════════════════════════════
+CONDITION FORMAT
+══════════════════════════════════════════════
+
+{"field": "ok", "op": "eq", "value": true}
+Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field, eq_type
+
+══════════════════════════════════════════════
+SELF-CHECK
+══════════════════════════════════════════════
+
+After writing all output_cases, walk each call chain:
+  Take entry's success output → does step 2's match reference those fields? ✓
+  Take step 2's success output → does step 3's match reference those fields? ✓
+  ... all the way to the leaf. If any link breaks, fix it.`;
+
+  const SKIP_KINDS = new Set(['struct', 'enum']);
+  const relevantNodes = nodes.filter((n) => !SKIP_KINDS.has(n.kind));
+
+  // Build adjacency for chain analysis
+  const adj = new Map<string, string[]>();
+  for (const e of edges) {
+    if (!adj.has(e.from)) adj.set(e.from, []);
+    adj.get(e.from)!.push(e.to);
+  }
+
+  // Find entry points (nodes with outgoing edges but no incoming, or known entry kinds)
+  const incomingNodes = new Set(edges.map((e) => e.to));
+  const ENTRY_KINDS = new Set(['route_handler', 'background_process']);
+  const entryPoints = nodes.filter(
+    (n) =>
+      ENTRY_KINDS.has(n.kind) || (!incomingNodes.has(n.id) && edges.some((e) => e.from === n.id)),
+  );
+
+  // Build chain descriptions for each entry point
+  function getChain(startId: string): string[] {
+    const visited = new Set<string>();
+    const order: string[] = [];
+    const queue = [startId];
+    visited.add(startId);
+    while (queue.length > 0) {
+      const id = queue.shift()!;
+      order.push(id);
+      for (const next of adj.get(id) || []) {
+        if (!visited.has(next)) {
+          visited.add(next);
+          queue.push(next);
+        }
+      }
+    }
+    return order;
+  }
+
+  const chains = entryPoints.map((ep) => {
+    const chain = getChain(ep.id);
+    return `  ${ep.id}:\n    ${chain.join(' → ')}`;
+  });
+
+  const formatNode = (n: (typeof nodes)[0]) =>
+    `[${n.kind}] id="${n.id}" name="${n.name}"${n.input ? ` input=${n.input}` : ''}${n.output ? ` output=${n.output}` : ''}\n  desc: ${n.description}${n.source_code ? `\n  source:\n${n.source_code}` : ''}`;
+
+  const nodesSummary = relevantNodes.map(formatNode).join('\n\n');
+  const edgesSummary = edges.map((e) => `  ${e.from} → ${e.to}  (${e.payload})`).join('\n');
+
+  const user = `Generate output_cases for all nodes in service "${serviceName}".
+
+CALL CHAINS (entry point → downstream nodes):
+${chains.join('\n')}
+
+For each chain above, plan the data pipeline BEFORE writing output_cases:
+  1. What does the entry point receive? (request body, CLI args, message payload)
+  2. What does each step need from its input? What does it produce?
+  3. What fields must be carried forward so later steps can access them?
+
+NODES:
+${nodesSummary}
+
+EDGES:
+${edgesSummary}
+
+Return the JSON object with output_cases and input_schemas for every node that appears in a chain.
+Do NOT include struct or enum nodes (type definitions only).
+DO include background_process, message_queue — they are executable and need output_cases.`;
 
   return { system, user };
 }
