@@ -159,12 +159,31 @@ export default function Sidebar(props: SidebarProps) {
       // Open inspector when node is selected (paused at breakpoint OR manual selection)
       if (isPausedAtBreakpoint || !isTracing) {
         setInspectorOpen(true);
-        setTimeout(() => {
-          inspectorRef.current?.scrollIntoView({
-            behavior: 'smooth',
-            block: 'start',
-          });
-        }, 310);
+
+        // Check if the selected node is exactly the one we paused on
+        const isAtBreakpointStep =
+          isPausedAtBreakpoint &&
+          traceVisible > 0 &&
+          traceSteps[traceVisible - 1]?.nodeId === selectedNode.id;
+
+        if (isAtBreakpointStep) {
+          setTraceFlowOpen(true);
+          const stepIndex = traceVisible - 1;
+          setExpandedStep(stepIndex);
+          setTimeout(() => {
+            const el = document.getElementById(`trace-step-${stepIndex}`);
+            if (el) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }, 310);
+        } else {
+          setTimeout(() => {
+            inspectorRef.current?.scrollIntoView({
+              behavior: 'smooth',
+              block: 'start',
+            });
+          }, 310);
+        }
       }
 
       // During active simulation (not paused), keep trace flow visible
@@ -177,7 +196,7 @@ export default function Sidebar(props: SidebarProps) {
     } else {
       setInspectorOpen(false);
     }
-  }, [selectedNode, isPausedAtBreakpoint, isTracing, traceSteps.length]);
+  }, [selectedNode, isPausedAtBreakpoint, isTracing, traceSteps, traceVisible]);
 
   // Collapse params/body if they're empty when route changes
   useEffect(() => {
@@ -498,6 +517,7 @@ export default function Sidebar(props: SidebarProps) {
                       return (
                         <div
                           key={i}
+                          id={`trace-step-${i}`}
                           className="mb-1"
                           style={{
                             animation: 'fadeInBlur 0.4s ease-out',
