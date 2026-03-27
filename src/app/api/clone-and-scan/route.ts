@@ -91,7 +91,11 @@ export async function POST(request: NextRequest) {
       const close = () => {
         if (closed) return;
         closed = true;
-        try { controller.close(); } catch { /* already closed */ }
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
       };
 
       let clonePath = '';

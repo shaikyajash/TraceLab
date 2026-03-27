@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import { useState } from "react";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import type { TraceStep } from "@/types";
-import { KIND_COLORS, KIND_LABELS } from "@/constants";
+import { useState } from 'react';
+import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import type { TraceStep } from '@/types';
+import { KIND_COLORS, KIND_LABELS } from '@/constants';
 
 interface TraceFlowProps {
   traceSteps: TraceStep[];
@@ -13,7 +13,12 @@ interface TraceFlowProps {
   clearTrace: () => void;
 }
 
-export default function TraceFlow({ traceSteps, traceVisible, isTracing, clearTrace }: TraceFlowProps) {
+export default function TraceFlow({
+  traceSteps,
+  traceVisible,
+  isTracing,
+  clearTrace,
+}: TraceFlowProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
 
   if (traceSteps.length === 0) return null;
@@ -21,10 +26,23 @@ export default function TraceFlow({ traceSteps, traceVisible, isTracing, clearTr
   return (
     <div className="fixed top-4 right-4 z-50 shadow-2xl">
       <Card className="w-[320px] bg-[#111114] border-[#2a2a2e] overflow-hidden">
-        <CardHeader className="p-3 border-b border-[#2a2a2e] flex flex-row items-center justify-between cursor-pointer" onClick={() => setIsCollapsed(!isCollapsed)}>
+        <CardHeader
+          className="p-3 border-b border-[#2a2a2e] flex flex-row items-center justify-between cursor-pointer"
+          onClick={() => setIsCollapsed(!isCollapsed)}
+        >
           <div className="flex items-center gap-2">
-            <svg className="w-3 h-3 text-[#378ADD]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            <svg
+              className="w-3 h-3 text-[#378ADD]"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M13 10V3L4 14h7v7l9-11h-7z"
+              />
             </svg>
             <h3 className="text-[10px] font-semibold text-[#ddd] uppercase tracking-wider">
               Trace Flow
@@ -34,14 +52,18 @@ export default function TraceFlow({ traceSteps, traceVisible, isTracing, clearTr
             </span>
           </div>
           <div className="flex items-center gap-1">
-         
-            <svg 
-              className={`w-3 h-3 text-[#555] transition-transform ${isCollapsed ? '' : 'rotate-180'}`} 
-              fill="none" 
-              viewBox="0 0 24 24" 
+            <svg
+              className={`w-3 h-3 text-[#555] transition-transform ${isCollapsed ? '' : 'rotate-180'}`}
+              fill="none"
+              viewBox="0 0 24 24"
               stroke="currentColor"
             >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 9l-7 7-7-7"
+              />
             </svg>
           </div>
         </CardHeader>
@@ -65,12 +87,12 @@ export default function TraceFlow({ traceSteps, traceVisible, isTracing, clearTr
                       </div>
                     )}
                     {/* Step card */}
-                    <div 
+                    <div
                       className="bg-[#0a0a0c] rounded p-2 transition-all hover:bg-[#0d0d0f]"
                       style={{ border: `0.5px solid ${colors.border}33` }}
                     >
                       <div className="flex items-center gap-1.5 mb-0.5">
-                        <div 
+                        <div
                           className="text-[7px] px-1 py-0.5 rounded font-bold"
                           style={{ background: colors.badgeBg, color: colors.badgeText }}
                         >
@@ -79,7 +101,9 @@ export default function TraceFlow({ traceSteps, traceVisible, isTracing, clearTr
                         <span className="text-[9px] text-[#bbb] font-medium">{step.name}</span>
                       </div>
                       {step.description && (
-                        <div className="text-[8px] text-[#666] leading-relaxed">{step.description}</div>
+                        <div className="text-[8px] text-[#666] leading-relaxed">
+                          {step.description}
+                        </div>
                       )}
                     </div>
                   </div>

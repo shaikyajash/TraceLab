@@ -35,10 +35,6 @@
       "Bash(find /Users/lohit/Desktop/office/TraceLab/scans -name *.json -type f)",
       "Bash(curl -s -N 'http://localhost:3000/api/clone-and-scan' -X POST -H 'Content-Type: application/json' --data-raw '{\"\"url\"\":\"\"https://version.btcfi.wtf/hashiraio/solver-engine\"\",\"\"forceRescan\"\":true}')"
     ],
-    "additionalDirectories": [
-      "/private/tmp/solver-engine",
-      "/tmp",
-      "/private/tmp"
-    ]
+    "additionalDirectories": ["/private/tmp/solver-engine", "/tmp", "/private/tmp"]
   }
 }

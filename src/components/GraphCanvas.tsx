@@ -1,8 +1,18 @@
-"use client";
+'use client';
 
-import { useState, useRef, useCallback, useEffect } from "react";
-import type { ComponentNode, PayloadEdge, TraceStep } from "@/types";
-import { NODE_W, NODE_H, KIND_COLORS, KIND_LABELS, CANVAS_WIDTH, CANVAS_HEIGHT, MIN_SCALE, MAX_SCALE, SCALE_STEP } from "@/constants";
+import { useState, useRef, useCallback, useEffect } from 'react';
+import type { ComponentNode, PayloadEdge, TraceStep } from '@/types';
+import {
+  NODE_W,
+  NODE_H,
+  KIND_COLORS,
+  KIND_LABELS,
+  CANVAS_WIDTH,
+  CANVAS_HEIGHT,
+  MIN_SCALE,
+  MAX_SCALE,
+  SCALE_STEP,
+} from '@/constants';
 
 interface GraphCanvasProps {
   coreNodes: ComponentNode[];
@@ -83,17 +93,20 @@ export default function GraphCanvas(props: GraphCanvasProps) {
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const dragStart = useRef<{ x: number; y: number; nodeX: number; nodeY: number } | null>(null);
 
-  const handleNodeMouseDown = useCallback((e: React.MouseEvent, nodeId: string, nodePos: { x: number; y: number }) => {
-    e.stopPropagation();
-    e.preventDefault();
-    setDraggingNodeId(nodeId);
-    dragStart.current = {
-      x: e.clientX,
-      y: e.clientY,
-      nodeX: nodePos.x,
-      nodeY: nodePos.y,
-    };
-  }, []);
+  const handleNodeMouseDown = useCallback(
+    (e: React.MouseEvent, nodeId: string, nodePos: { x: number; y: number }) => {
+      e.stopPropagation();
+      e.preventDefault();
+      setDraggingNodeId(nodeId);
+      dragStart.current = {
+        x: e.clientX,
+        y: e.clientY,
+        nodeX: nodePos.x,
+        nodeY: nodePos.y,
+      };
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!draggingNodeId) return;
@@ -130,28 +143,28 @@ export default function GraphCanvas(props: GraphCanvasProps) {
   });
 
   // Create a map of function steps that appear between nodes (not in coreNodes)
-  const functionSteps = traceSteps.slice(0, traceVisible).filter(
-    (step) => step.kind === "function" && !coreNodes.some(n => n.id === step.nodeId)
-  );
+  const functionSteps = traceSteps
+    .slice(0, traceVisible)
+    .filter((step) => step.kind === 'function' && !coreNodes.some((n) => n.id === step.nodeId));
 
   // Map functions to edges they belong to (between which two nodes)
   const edgeFunctions = new Map<string, typeof functionSteps>();
   for (let i = 0; i < traceSteps.slice(0, traceVisible).length; i++) {
     const step = traceSteps[i];
-    if (step.kind === "function" && !coreNodes.some(n => n.id === step.nodeId)) {
+    if (step.kind === 'function' && !coreNodes.some((n) => n.id === step.nodeId)) {
       // Find the previous and next core nodes
       let prevNodeId = null;
       let nextNodeId = null;
 
       for (let j = i - 1; j >= 0; j--) {
-        if (coreNodes.some(n => n.id === traceSteps[j].nodeId)) {
+        if (coreNodes.some((n) => n.id === traceSteps[j].nodeId)) {
           prevNodeId = traceSteps[j].nodeId;
           break;
         }
       }
 
       for (let j = i + 1; j < traceSteps.slice(0, traceVisible).length; j++) {
-        if (coreNodes.some(n => n.id === traceSteps[j].nodeId)) {
+        if (coreNodes.some((n) => n.id === traceSteps[j].nodeId)) {
           nextNodeId = traceSteps[j].nodeId;
           break;
         }
@@ -178,9 +191,9 @@ export default function GraphCanvas(props: GraphCanvasProps) {
     <div
       style={{
         flex: 1,
-        position: "relative",
-        overflow: "hidden",
-        cursor: isPanning ? "grabbing" : "grab",
+        position: 'relative',
+        overflow: 'hidden',
+        cursor: isPanning ? 'grabbing' : 'grab',
       }}
       onMouseDown={handleCanvasMouseDown}
       onMouseMove={handleCanvasMouseMove}
@@ -192,33 +205,61 @@ export default function GraphCanvas(props: GraphCanvasProps) {
       <div
         id="graph-wrap"
         style={{
-          position: "absolute",
+          position: 'absolute',
           top: 0,
           left: 0,
           transform: `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`,
-          transformOrigin: "0 0",
-          transition: isPanning ? "none" : "transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
-          willChange: isPanning ? "transform" : "auto",
+          transformOrigin: '0 0',
+          transition: isPanning ? 'none' : 'transform 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+          willChange: isPanning ? 'transform' : 'auto',
         }}
       >
         {/* SVG edges */}
         <svg
           style={{
-            position: "absolute",
+            position: 'absolute',
             top: 0,
             left: 0,
             width: CANVAS_WIDTH,
             height: CANVAS_HEIGHT,
-            overflow: "visible",
-            pointerEvents: "none",
+            overflow: 'visible',
+            pointerEvents: 'none',
           }}
         >
           <defs>
-            <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-              <path d="M2 1L8 5L2 9" fill="none" stroke="#2a4a7a" strokeWidth="1.5" strokeLinecap="round" />
+            <marker
+              id="arr"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path
+                d="M2 1L8 5L2 9"
+                fill="none"
+                stroke="#2a4a7a"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
             </marker>
-            <marker id="arr-lit" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-              <path d="M2 1L8 5L2 9" fill="none" stroke="#378ADD" strokeWidth="1.5" strokeLinecap="round" />
+            <marker
+              id="arr-lit"
+              viewBox="0 0 10 10"
+              refX="8"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path
+                d="M2 1L8 5L2 9"
+                fill="none"
+                stroke="#378ADD"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
             </marker>
           </defs>
           {coreEdges.map((edge, i) => {
@@ -235,14 +276,14 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 key={i}
                 d={edgePath(x1, y1, x2, y2)}
                 fill="none"
-                stroke={isLit ? "#378ADD" : "#1a3a5c"}
+                stroke={isLit ? '#378ADD' : '#1a3a5c'}
                 strokeWidth={isLit ? 2 : 1.5}
                 strokeDasharray="5 4"
-                markerEnd={isLit ? "url(#arr-lit)" : "url(#arr)"}
+                markerEnd={isLit ? 'url(#arr-lit)' : 'url(#arr)'}
                 style={{
-                  animation: "dash 1.2s linear infinite",
+                  animation: 'dash 1.2s linear infinite',
                   animationDelay: `${i * 0.15}s`,
-                  transition: "stroke 0.3s, stroke-width 0.3s",
+                  transition: 'stroke 0.3s, stroke-width 0.3s',
                 }}
               />
             );
@@ -278,9 +319,10 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 zIndex: 5,
               }}
             >
-              <div className="w-6 h-6 rounded-full bg-[#854F0B] border-2 border-[#0d0d0f] flex items-center justify-center cursor-pointer hover:scale-110 transition-transform"
+              <div
+                className="w-6 h-6 rounded-full bg-[#854F0B] border-2 border-[#0d0d0f] flex items-center justify-center cursor-pointer hover:scale-110 transition-transform"
                 style={{
-                  boxShadow: "0 2px 8px rgba(133, 79, 11, 0.4)"
+                  boxShadow: '0 2px 8px rgba(133, 79, 11, 0.4)',
                 }}
               >
                 <span className="text-[8px] font-bold text-white">{functions.length}</span>
@@ -348,7 +390,10 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 }
 
                 // Only allow breakpoints on nodes that are part of the trace
-                if (activeTraceIds.has(node.id) || traceSteps.some(step => step.nodeId === node.id)) {
+                if (
+                  activeTraceIds.has(node.id) ||
+                  traceSteps.some((step) => step.nodeId === node.id)
+                ) {
                   toggleBreakpoint(node.id);
                 }
               }}
@@ -358,25 +403,29 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 top: pos.y,
                 width: NODE_W,
                 minHeight: NODE_H,
-                background: "#111114",
+                background: '#111114',
                 border: isPausedHere
-                  ? "3px solid #f59e0b"
+                  ? '3px solid #f59e0b'
                   : isBreakpoint
-                    ? "2px solid #f59e0b"
+                    ? '2px solid #f59e0b'
                     : isHead
                       ? `2px solid ${colors.border}`
                       : isSelected
-                        ? "2px solid #378ADD"
+                        ? '2px solid #378ADD'
                         : isTraceActive
                           ? `2px solid ${colors.border}66`
-                          : "1px solid #2a2a2e",
+                          : '1px solid #2a2a2e',
                 borderRadius: 10,
                 opacity: isGreyedOut ? 0.25 : 1,
-                cursor: isDragging ? "grabbing" : isGreyedOut ? "not-allowed" : "grab",
-                overflow: "visible",
-                boxShadow: isPausedHere ? "0 0 20px rgba(245, 158, 11, 0.6)" : isDragging ? "0 8px 24px rgba(0,0,0,0.4)" : "none",
+                cursor: isDragging ? 'grabbing' : isGreyedOut ? 'not-allowed' : 'grab',
+                overflow: 'visible',
+                boxShadow: isPausedHere
+                  ? '0 0 20px rgba(245, 158, 11, 0.6)'
+                  : isDragging
+                    ? '0 8px 24px rgba(0,0,0,0.4)'
+                    : 'none',
                 zIndex: isDragging ? 100 : undefined,
-                userSelect: "none",
+                userSelect: 'none',
               }}
             >
               {/* Breakpoint indicator - top right corner */}
@@ -384,7 +433,7 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 <div
                   className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-[#f59e0b] flex items-center justify-center z-10 border-2 border-[#0d0d0f]"
                   style={{
-                    boxShadow: "0 2px 8px rgba(245, 158, 11, 0.5)"
+                    boxShadow: '0 2px 8px rgba(245, 158, 11, 0.5)',
                   }}
                   title="Breakpoint"
                 >
@@ -400,7 +449,7 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                       key={idx}
                       className="w-6 h-6 rounded-full bg-[#378ADD] flex items-center justify-center text-[10px] font-bold text-white border-2 border-[#0d0d0f]"
                       style={{
-                        boxShadow: "0 2px 8px rgba(55, 138, 221, 0.4)"
+                        boxShadow: '0 2px 8px rgba(55, 138, 221, 0.4)',
                       }}
                     >
                       {num}
@@ -412,7 +461,9 @@ export default function GraphCanvas(props: GraphCanvasProps) {
               {/* Top colored strip */}
               <div
                 className="h-1 w-full"
-                style={{ background: isPausedHere ? "#f59e0b" : isBreakpoint ? "#f59e0b" : colors.border }}
+                style={{
+                  background: isPausedHere ? '#f59e0b' : isBreakpoint ? '#f59e0b' : colors.border,
+                }}
               />
 
               {/* Content */}
@@ -453,7 +504,9 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 {/* Description */}
                 {node.description && (
                   <div className="text-[9px] text-[#777] leading-relaxed">
-                    {node.description.length > 85 ? node.description.slice(0, 85) + "..." : node.description}
+                    {node.description.length > 85
+                      ? node.description.slice(0, 85) + '...'
+                      : node.description}
                   </div>
                 )}
               </div>
@@ -479,9 +532,15 @@ export default function GraphCanvas(props: GraphCanvasProps) {
               </button>
             )}
             {[
-              { label: "fit view", action: fitView },
-              { label: "+ zoom", action: () => setScale((s) => Math.min(MAX_SCALE, s + SCALE_STEP)) },
-              { label: "– zoom", action: () => setScale((s) => Math.max(MIN_SCALE, s - SCALE_STEP)) },
+              { label: 'fit view', action: fitView },
+              {
+                label: '+ zoom',
+                action: () => setScale((s) => Math.min(MAX_SCALE, s + SCALE_STEP)),
+              },
+              {
+                label: '– zoom',
+                action: () => setScale((s) => Math.max(MIN_SCALE, s - SCALE_STEP)),
+              },
             ].map((btn, i) => (
               <button
                 key={i}
@@ -507,13 +566,23 @@ export default function GraphCanvas(props: GraphCanvasProps) {
 
           {/* Second row: Info banner */}
           <div className="bg-[#111114]/90 backdrop-blur-sm border border-[#f59e0b] rounded-lg px-4 py-2 flex items-center gap-2 shadow-lg w-fit">
-            <svg className="w-4 h-4 text-[#f59e0b] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <svg
+              className="w-4 h-4 text-[#f59e0b] shrink-0"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
             </svg>
             <span className="text-[10px] text-[#888] font-medium whitespace-nowrap">
               {traceSteps.length > 0
-                ? "Right-click on traced nodes to add breakpoints"
-                : "Run a simulation first to enable breakpoints"}
+                ? 'Right-click on traced nodes to add breakpoints'
+                : 'Run a simulation first to enable breakpoints'}
             </span>
           </div>
 

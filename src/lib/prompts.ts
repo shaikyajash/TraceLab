@@ -277,13 +277,53 @@ Rules:
     THEIR conditions. If business_logic needs to check "authorized", then middleware's success
     output must include an "authorized" field.
 
-HOW TO WRITE output_cases — step by step:
-  1. Look at this node's incoming edges. What nodes call it? What do they output?
-  2. The fields in those outputs are the fields you can match on in this node's output_cases.
-  3. Write the success case(s): condition on the "happy path" fields from upstream.
-     Output must include fields that DOWNSTREAM nodes will need to match on.
-  4. Write the error/rejection case(s) with "terminates": true.
-  5. Optionally add a catch-all (match: []) as the last case.
+HOW TO WRITE output_cases — MANDATORY PROCEDURE (do this for EVERY node in a trace):
+
+  For each trace this node appears in, look at the step BEFORE this node and the step AFTER:
+
+  1. LOOK UPSTREAM: What node is the previous step? What does its success output_case output?
+     → Those fields are what THIS node receives as input.
+     → Your match conditions MUST reference fields from THAT output, not the original request.
+
+  2. LOOK DOWNSTREAM: What node is the next step? What fields does it need to match on?
+     → Your success output MUST include those fields so the next node can evaluate its conditions.
+     → If the next node checks "ok", your output must contain an "ok" field.
+
+  3. CARRY FORWARD: If a downstream node (not just the next step, but ANY later step) needs a
+     field that originated earlier in the chain, you MUST carry it forward in your output.
+     Example: if step 5 needs "solver_id" that was set in step 2, steps 3 and 4 must each
+     include "solver_id" in their success outputs so it reaches step 5.
+
+  4. WRITE SUCCESS CASE: match on upstream success fields → output includes downstream-needed fields.
+  5. WRITE ERROR CASE(S): match on upstream error/missing fields → output error + "terminates": true.
+  6. WRITE CATCH-ALL (optional): match: [] → error output + "terminates": true.
+
+  CONCRETE EXAMPLE — 4-step chain:
+    Step 1 (route_handler): receives request {"url": "...", "chains": [...]}
+      output_case match: [{"field": "url", "op": "exists"}]
+      output: {"ok": true, "url": "...", "chains": ["eth"]}          ← carries url + chains forward
+
+    Step 2 (middleware): receives step 1's output
+      output_case match: [{"field": "ok", "op": "eq", "value": true}, {"field": "url", "op": "exists"}]
+      output: {"ok": true, "url": "...", "verified": true}           ← carries url forward, adds verified
+      error case match: [{"field": "ok", "op": "eq", "value": false}]
+      output: {"ok": false, "error": "upstream failed"}, terminates: true
+
+    Step 3 (business_logic): receives step 2's output
+      output_case match: [{"field": "ok", "op": "eq", "value": true}, {"field": "verified", "op": "eq", "value": true}]
+      output: {"ok": true, "result": {"registered": true}}           ← uses fields from step 2
+      error case match: [{"field": "ok", "op": "eq", "value": false}]
+      output: {"ok": false, "error": "upstream failed"}, terminates: true
+
+    Step 4 (db_call): receives step 3's output
+      output_case match: [{"field": "ok", "op": "eq", "value": true}, {"field": "result", "op": "exists"}]
+      output: {"ok": true, "stored": true}                           ← uses "result" from step 3
+      error case match: [{"field": "ok", "op": "eq", "value": false}]
+      output: {"ok": false, "error": "upstream failed"}, terminates: true
+
+  KEY INSIGHT: If the user edits step 2's input and removes the "url" field, step 2's match
+  fails → falls to catch-all → outputs {ok: false, error: ...} with terminates: true →
+  chain STOPS at step 2. Steps 3 and 4 never run. This is correct behavior.
 
 ══════════════════════════════════════════════
 RULE 8 — TRACES (most critical section)
@@ -487,61 +527,127 @@ EXAMPLE OUTPUT SHAPE (generic — replace all placeholders with real values)
 {
   "service": {"id": "<name>", "kind": "service", "path": "<path>", "description": "<desc>"},
   "nodes": [
+EXAMPLE CHAIN FLOW (read top-to-bottom — each node's output becomes the next node's input):
+
+    STEP 1: {"id": "POST /items/{id}", "kind": "route_handler", ...
+     "output_cases": [
+       {"match": [{"field": "name", "op": "exists"}],
+        "output": {"ok": true, "name": "widget", "token": "Bearer abc"},
+        "explanation": "Valid request body — forward name + token to middleware"},
+       {"match": [],
+        "output": {"ok": false, "error": "Missing required fields"},
+        "explanation": "Invalid body", "terminates": true}
+     ]}
+       ↓ step 1 outputs: {"ok": true, "name": "widget", "token": "Bearer abc"}
+
+    STEP 2: {"id": "auth_middleware", "kind": "middleware", ...
+     "output_cases": [
+       {"match": [{"field": "ok", "op": "eq", "value": true}, {"field": "token", "op": "exists"}],
+        "output": {"ok": true, "authorized": true, "user_id": "usr_123", "name": "widget"},
+        "explanation": "ok + token from step 1 → authorized. Carry 'name' forward for step 3."},
+       {"match": [{"field": "ok", "op": "eq", "value": false}],
+        "output": {"ok": false, "error": "Upstream rejected"},
+        "explanation": "Step 1 already failed", "terminates": true},
+       {"match": [],
+        "output": {"ok": false, "authorized": false, "status": 401},
+        "explanation": "No token in step 1 output", "terminates": true}
+     ]}
+       ↓ step 2 outputs: {"ok": true, "authorized": true, "user_id": "usr_123", "name": "widget"}
+
+    STEP 3: {"id": "create_item", "kind": "business_logic", ...
+     "output_cases": [
+       {"match": [{"field": "ok", "op": "eq", "value": true}, {"field": "authorized", "op": "eq", "value": true}],
+        "output": {"ok": true, "item": {"id": "item_1", "name": "widget", "owner": "usr_123"}},
+        "explanation": "ok + authorized from step 2 → create item. Uses name + user_id from step 2."},
+       {"match": [{"field": "authorized", "op": "eq", "value": false}],
+        "output": {"ok": false, "error": "Unauthorized"},
+        "explanation": "Step 2 rejected auth", "terminates": true},
+       {"match": [],
+        "output": {"ok": false, "error": "Unexpected input"},
+        "explanation": "Catch-all", "terminates": true}
+     ]}
+       ↓ step 3 outputs: {"ok": true, "item": {"id": "item_1", "name": "widget", "owner": "usr_123"}}
+
+    STEP 4: {"id": "insert_item_db", "kind": "db_call", ...
+     "output_cases": [
+       {"match": [{"field": "ok", "op": "eq", "value": true}, {"field": "item", "op": "exists"}],
+        "output": {"ok": true, "stored": true, "id": "item_1"},
+        "explanation": "ok + item from step 3 → INSERT into DB"},
+       {"match": [{"field": "ok", "op": "eq", "value": false}],
+        "output": {"ok": false, "error": "Upstream failed — skipped DB"},
+        "explanation": "Step 3 failed", "terminates": true},
+       {"match": [],
+        "output": {"ok": false, "error": "DB insert failed"},
+        "explanation": "Catch-all", "terminates": true}
+     ]}
+
+    KEY: If user edits step 2's input and removes "token", step 2 falls to catch-all →
+    outputs {"ok": false, "authorized": false, "status": 401} with terminates: true →
+    chain STOPS. Steps 3 and 4 never execute.
+
+    The above is the PATTERN you must follow for every node in every trace.
+
+    Full node definitions (replace all placeholders with real values from source code):
+
     {"id": "POST /items/{id}", "service": "<svc>", "kind": "route_handler", "name": "<Name>",
      "input": "<InputType>", "output": "<OutputType>", "mutates_state": true,
      "mutation_target": "<table>", "defined_in": "src/handlers.rs",
      "description": "<what it does>", "method": "POST", "path_pattern": "/items/{id}",
      "handler": "<module::fn>", "source_code": "<verbatim fn body>",
-     "example_payload": "{\"field\":\"value\"}",
-     "example_input": {"field": "value"}, "example_output": {"result": "value"}, "fields": null,
-     "output_cases": [
-       {"match": [{"field": "field", "op": "exists"}], "output": {"ok": true, "data": {"field": "value"}}, "explanation": "Valid input — passes data downstream"},
-       {"match": [], "output": {"ok": false, "error": "Invalid input"}, "explanation": "Catch-all failure", "terminates": true}
-     ]},
+     "example_payload": "{\"name\":\"widget\"}",
+     "example_input": {"name": "widget"}, "example_output": {"ok": true, "name": "widget"}, "fields": null,
+     "output_cases": "... (see chain flow above)"},
     {"id": "<middleware_id>", "service": "<svc>", "kind": "middleware", "name": "<Name>",
-     "input": "Request", "output": "Request with <Ext> or <error>", "mutates_state": false,
+     "input": "Request", "output": "Request + auth context or error", "mutates_state": false,
      "mutation_target": null, "defined_in": "src/auth.rs", "description": "<desc>",
      "method": null, "path_pattern": null, "handler": null,
      "source_code": "<verbatim>", "example_payload": null,
-     "example_input": {"headers": {"Authorization": "Bearer <token>"}}, "example_output": {"authorized": true, "user_id": "<id>"}, "fields": null,
-     "output_cases": [
-       {"match": [{"field": "headers.Authorization", "op": "exists"}], "output": {"authorized": true, "user_id": "usr_123"}, "explanation": "Token present — authorized"},
-       {"match": [], "output": {"authorized": false, "status": 401}, "explanation": "No token — rejected", "terminates": true}
-     ]},
+     "example_input": {"ok": true, "token": "Bearer abc"},
+     "example_output": {"ok": true, "authorized": true, "user_id": "usr_123"}, "fields": null,
+     "output_cases": "... (see chain flow above)"},
     {"id": "<fn_name>", "service": "<svc>", "kind": "business_logic", "name": "<Name>",
      "input": "<type>", "output": "<type>", "mutates_state": false, "mutation_target": null,
      "defined_in": "src/domain.rs", "description": "<desc>", "method": null,
      "path_pattern": null, "handler": null, "source_code": "<verbatim>",
      "example_payload": null,
-     "example_input": {"authorized": true, "data": {"<field>": "<value>"}},
-     "example_output": {"ok": true, "result": {"<field>": "<value>"}}, "fields": null,
-     "output_cases": [
-       {"match": [{"field": "authorized", "op": "eq", "value": true}], "output": {"ok": true, "result": {"<field>": "<value>"}}, "explanation": "Auth passed — process data"},
-       {"match": [{"field": "authorized", "op": "eq", "value": false}], "output": {"ok": false, "error": "Unauthorized"}, "explanation": "Middleware rejected", "terminates": true},
-       {"match": [], "output": {"ok": false, "error": "Unexpected input shape"}, "explanation": "Catch-all", "terminates": true}
-     ]},
+     "example_input": {"ok": true, "authorized": true, "name": "widget"},
+     "example_output": {"ok": true, "item": {"id": "item_1", "name": "widget"}}, "fields": null,
+     "output_cases": "... (see chain flow above)"},
     {"id": "<validate_fn>", "service": "<svc>", "kind": "validator", "name": "<Name>",
      "input": "<type>", "output": "Result<(), <Err>>", "mutates_state": false,
      "mutation_target": null, "defined_in": "src/validate.rs", "description": "<desc>",
      "method": null, "path_pattern": null, "handler": null, "source_code": "<verbatim>",
      "example_payload": null,
-     "example_input": {"<field>": "<valid-value>"},
-     "example_output": {"ok": true, "data": {"<field>": "<valid-value>"}}, "fields": null,
+     "example_input": {"ok": true, "data": {"field": "value"}},
+     "example_output": {"ok": true, "valid": true, "data": {"field": "value"}}, "fields": null,
      "output_cases": [
-       {"match": [{"field": "<field>", "op": "exists"}], "output": {"ok": true, "data": {"<field>": "<valid-value>"}}, "explanation": "Required field present — valid"},
-       {"match": [], "output": {"ok": false, "error": "<field> is required"}, "explanation": "Missing required field", "terminates": true}
+       {"match": [{"field": "ok", "op": "eq", "value": true}, {"field": "data.field", "op": "exists"}],
+        "output": {"ok": true, "valid": true, "data": {"field": "value"}},
+        "explanation": "ok from upstream + required field present → valid. Carry data forward."},
+       {"match": [{"field": "ok", "op": "eq", "value": false}],
+        "output": {"ok": false, "error": "Upstream failed"},
+        "explanation": "Upstream failed", "terminates": true},
+       {"match": [],
+        "output": {"ok": false, "error": "Validation failed — missing field"},
+        "explanation": "Missing required field", "terminates": true}
      ]},
     {"id": "<db_fn>", "service": "<svc>", "kind": "db_call", "name": "<Name>",
      "input": "<params>", "output": "Result<<Record>>", "mutates_state": true,
      "mutation_target": "<table>", "defined_in": "src/store.rs", "description": "<SQL op>",
      "method": null, "path_pattern": null, "handler": null, "source_code": "<verbatim>",
      "example_payload": null,
-     "example_input": {"ok": true, "data": {"<param>": "<value>"}},
-     "example_output": {"ok": true, "record": {"id": "<id>", "<field>": "<value>"}}, "fields": null,
+     "example_input": {"ok": true, "item": {"id": "item_1", "name": "widget"}},
+     "example_output": {"ok": true, "stored": true, "id": "item_1"}, "fields": null,
      "output_cases": [
-       {"match": [{"field": "ok", "op": "eq", "value": true}], "output": {"ok": true, "record": {"id": "<id>", "<field>": "<value>"}}, "explanation": "Upstream success — query DB"},
-       {"match": [{"field": "error", "op": "exists"}], "output": {"ok": false, "error": "Skipped — upstream error"}, "explanation": "Upstream failed", "terminates": true},
-       {"match": [], "output": {"ok": false, "error": "DB operation failed"}, "explanation": "Catch-all", "terminates": true}
+       {"match": [{"field": "ok", "op": "eq", "value": true}, {"field": "item", "op": "exists"}],
+        "output": {"ok": true, "stored": true, "id": "item_1"},
+        "explanation": "ok from upstream + item data present → INSERT into DB"},
+       {"match": [{"field": "ok", "op": "eq", "value": false}],
+        "output": {"ok": false, "error": "Upstream failed — skipped DB"},
+        "explanation": "Upstream failed", "terminates": true},
+       {"match": [],
+        "output": {"ok": false, "error": "DB operation failed"},
+        "explanation": "Catch-all", "terminates": true}
      ]},
     {"id": "enum_<Name>", "service": "<svc>", "kind": "enum", "name": "<Name>",
      "input": null, "output": null, "mutates_state": false, "mutation_target": null,

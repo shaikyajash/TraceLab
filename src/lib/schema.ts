@@ -20,7 +20,16 @@ export interface ComponentsGraph {
 /** Condition for matching a trace to a payload or filtering a step */
 export interface StepCondition {
   field: string;
-  op: 'eq' | 'neq' | 'in' | 'not_in' | 'exists' | 'not_exists' | 'eq_field' | 'neq_field' | 'eq_type';
+  op:
+    | 'eq'
+    | 'neq'
+    | 'in'
+    | 'not_in'
+    | 'exists'
+    | 'not_exists'
+    | 'eq_field'
+    | 'neq_field'
+    | 'eq_type';
   value?: string | string[];
 }
 

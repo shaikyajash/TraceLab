@@ -1,7 +1,14 @@
-"use client";
+'use client';
 
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
-import type { ComponentsGraph, ComponentNode, PayloadEdge, ScanProgress, TraceStep, TraceStepDef } from "@/types";
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import type {
+  ComponentsGraph,
+  ComponentNode,
+  PayloadEdge,
+  ScanProgress,
+  TraceStep,
+  TraceStepDef,
+} from '@/types';
 import { resolveTrace } from '@/lib/trace-resolver';
 import { resolveNodeOutput } from '@/lib/simulation';
 import {
@@ -21,14 +28,14 @@ import {
   TRACE_STEP_DELAY,
   TRACE_HEAD_CLEAR_DELAY,
   STORAGE_KEYS,
-} from "@/constants";
-import LandingPage from "@/components/LandingPage";
-import Sidebar from "@/components/Sidebar";
-import GraphCanvas from "@/components/GraphCanvas";
+} from '@/constants';
+import LandingPage from '@/components/LandingPage';
+import Sidebar from '@/components/Sidebar';
+import GraphCanvas from '@/components/GraphCanvas';
 
 function layoutNodes(
   nodes: ComponentNode[],
-  edges: PayloadEdge[]
+  edges: PayloadEdge[],
 ): Map<string, { x: number; y: number }> {
   const positions = new Map<string, { x: number; y: number }>();
   const ids = new Set(nodes.map((n) => n.id));
@@ -44,7 +51,7 @@ function layoutNodes(
   }
 
   const depth = new Map<string, number>();
-  const roots = nodes.filter((n) => !(incoming.get(n.id)?.length));
+  const roots = nodes.filter((n) => !incoming.get(n.id)?.length);
   const queue: string[] = [];
 
   for (const r of roots) {
@@ -122,15 +129,14 @@ function layoutNodes(
   return positions;
 }
 
-
 export default function Home() {
   const [graph, setGraph] = useState<ComponentsGraph | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [githubUrl, setGithubUrl] = useState("");
-  const [branch, setBranch] = useState("");
+  const [githubUrl, setGithubUrl] = useState('');
+  const [branch, setBranch] = useState('');
   const [isScanning, setIsScanning] = useState(false);
-  const [scanMessage, setScanMessage] = useState("");
-  const [scanPhase, setScanPhase] = useState<string>("");
+  const [scanMessage, setScanMessage] = useState('');
+  const [scanPhase, setScanPhase] = useState<string>('');
   const [forceRescan, setForceRescan] = useState(false);
 
   /* restore session from localStorage on mount */
@@ -141,7 +147,7 @@ export default function Home() {
       if (savedGraph) setGraph(JSON.parse(savedGraph));
       if (savedUrl) setGithubUrl(savedUrl);
     } catch (err) {
-      console.error("Failed to restore session:", err);
+      console.error('Failed to restore session:', err);
     }
   }, []);
 
@@ -162,7 +168,7 @@ export default function Home() {
   const resizeStart = useRef({ x: 0, w: DEFAULT_SIDEBAR_WIDTH });
 
   /* simulation tracing */
-  const [traceMethod, setTraceMethod] = useState("GET");
+  const [traceMethod, setTraceMethod] = useState('GET');
   const [traceRouteId, setTraceRouteId] = useState<string | null>(null);
   const [activeTraceIds, setActiveTraceIds] = useState<Set<string>>(new Set());
   const [traceHeadId, setTraceHeadId] = useState<string | null>(null);
@@ -175,7 +181,7 @@ export default function Home() {
 
   /* request builder */
   const [pathParams, setPathParams] = useState<Record<string, string>>({});
-  const [reqBody, setReqBody] = useState("{\n  \n}");
+  const [reqBody, setReqBody] = useState('{\n  \n}');
 
   /* graph transition */
   const [isGraphLoaded, setIsGraphLoaded] = useState(false);
@@ -200,7 +206,7 @@ export default function Home() {
       const offset = isSidebarCollapsed ? sidebarWidth / 2 : -sidebarWidth / 2;
       // Use requestAnimationFrame for smoother transition
       requestAnimationFrame(() => {
-        setTx(prev => prev + offset);
+        setTx((prev) => prev + offset);
       });
       prevCollapsedRef.current = isSidebarCollapsed;
     }
@@ -216,24 +222,22 @@ export default function Home() {
 
   const coreEdges = useMemo(() => {
     if (!graph) return [];
-    return graph.edges.filter(
-      (e) => coreNodeIds.has(e.from) && coreNodeIds.has(e.to)
-    );
+    return graph.edges.filter((e) => coreNodeIds.has(e.from) && coreNodeIds.has(e.to));
   }, [graph, coreNodeIds]);
 
   /* routes for sidebar */
   const routes = useMemo(() => {
-    return coreNodes.filter((n) => n.kind === "route_handler");
+    return coreNodes.filter((n) => n.kind === 'route_handler');
   }, [coreNodes]);
 
   /* extract path params from selected route pattern */
   const routePathParams = useMemo(() => {
     if (!traceRouteId) return [];
     const node = coreNodes.find((n) => n.id === traceRouteId);
-    const pattern = node?.path_pattern || "";
+    const pattern = node?.path_pattern || '';
     const matches = pattern.match(/[:{}][a-zA-Z_]+}?/g);
     if (!matches) return [];
-    return matches.map((m) => m.replace(/[:{}]/g, ""));
+    return matches.map((m) => m.replace(/[:{}]/g, ''));
   }, [traceRouteId, coreNodes]);
 
   /* auto-populate method, path params, and body when route changes */
@@ -246,11 +250,11 @@ export default function Home() {
       setTraceMethod(node.method.toUpperCase());
     } else {
       const idUpper = node.id.toUpperCase();
-      if (idUpper.startsWith("GET ")) setTraceMethod("GET");
-      else if (idUpper.startsWith("POST ")) setTraceMethod("POST");
-      else if (idUpper.startsWith("PUT ")) setTraceMethod("PUT");
-      else if (idUpper.startsWith("DELETE ")) setTraceMethod("DELETE");
-      else if (idUpper.startsWith("PATCH ")) setTraceMethod("PATCH");
+      if (idUpper.startsWith('GET ')) setTraceMethod('GET');
+      else if (idUpper.startsWith('POST ')) setTraceMethod('POST');
+      else if (idUpper.startsWith('PUT ')) setTraceMethod('PUT');
+      else if (idUpper.startsWith('DELETE ')) setTraceMethod('DELETE');
+      else if (idUpper.startsWith('PATCH ')) setTraceMethod('PATCH');
     }
 
     if (node.example_payload) {
@@ -260,18 +264,16 @@ export default function Home() {
         setReqBody(node.example_payload);
       }
     } else {
-      setReqBody("{\n  \n}");
+      setReqBody('{\n  \n}');
     }
 
     const init: Record<string, string> = {};
-    for (const p of routePathParams) init[p] = "";
+    for (const p of routePathParams) init[p] = '';
     setPathParams(init);
   }, [traceRouteId, coreNodes, routePathParams]);
 
   /* positions */
-  const [positions, setPositions] = useState<Map<string, { x: number; y: number }>>(
-    new Map()
-  );
+  const [positions, setPositions] = useState<Map<string, { x: number; y: number }>>(new Map());
   const initialFitDone = useRef(false);
 
   useEffect(() => {
@@ -283,65 +285,77 @@ export default function Home() {
   }, [graph, coreNodes, coreEdges]);
 
   /* sidebar resize handlers */
-  const handleResizeStart = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    setIsResizing(true);
-    resizeStart.current = { x: e.clientX, w: sidebarWidth };
-  }, [sidebarWidth]);
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setIsResizing(true);
+      resizeStart.current = { x: e.clientX, w: sidebarWidth };
+    },
+    [sidebarWidth],
+  );
 
   useEffect(() => {
     if (!isResizing) return;
     const onMove = (e: MouseEvent) => {
       const delta = e.clientX - resizeStart.current.x;
-      setSidebarWidth(Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, resizeStart.current.w + delta)));
+      setSidebarWidth(
+        Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, resizeStart.current.w + delta)),
+      );
     };
     const onUp = () => setIsResizing(false);
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
     return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
     };
   }, [isResizing]);
 
   /* parse git clone command or URL */
-  const parseGitInput = useCallback((input: string): { url: string; branch?: string } => {
-    const trimmed = input.trim();
+  const parseGitInput = useCallback(
+    (input: string): { url: string; branch?: string } => {
+      const trimmed = input.trim();
 
-    // Check if it's a git clone command
-    if (trimmed.startsWith('git clone')) {
-      const branchMatch = trimmed.match(/-b\s+([^\s]+)/);
-      const extractedBranch = branchMatch ? branchMatch[1] : undefined;
-      const urlMatch = trimmed.match(/(?:https?:\/\/|git@)[^\s]+/);
-      const extractedUrl = urlMatch ? urlMatch[0] : trimmed;
-      return { url: extractedUrl, branch: extractedBranch };
-    }
+      // Check if it's a git clone command
+      if (trimmed.startsWith('git clone')) {
+        const branchMatch = trimmed.match(/-b\s+([^\s]+)/);
+        const extractedBranch = branchMatch ? branchMatch[1] : undefined;
+        const urlMatch = trimmed.match(/(?:https?:\/\/|git@)[^\s]+/);
+        const extractedUrl = urlMatch ? urlMatch[0] : trimmed;
+        return { url: extractedUrl, branch: extractedBranch };
+      }
 
-    // Check if it's a web URL with /src/branch/ pattern (Gitea/GitLab style)
-    const webBranchMatch = trimmed.match(/^(https?:\/\/[^/]+\/[^/]+\/[^/]+)\/src\/branch\/(.+?)\/?$/);
-    if (webBranchMatch) {
-      const baseUrl = webBranchMatch[1];
-      const branchName = webBranchMatch[2];
-      return {
-        url: baseUrl.endsWith('.git') ? baseUrl : `${baseUrl}.git`,
-        branch: branchName
-      };
-    }
+      // Check if it's a web URL with /src/branch/ pattern (Gitea/GitLab style)
+      const webBranchMatch = trimmed.match(
+        /^(https?:\/\/[^/]+\/[^/]+\/[^/]+)\/src\/branch\/(.+?)\/?$/,
+      );
+      if (webBranchMatch) {
+        const baseUrl = webBranchMatch[1];
+        const branchName = webBranchMatch[2];
+        return {
+          url: baseUrl.endsWith('.git') ? baseUrl : `${baseUrl}.git`,
+          branch: branchName,
+        };
+      }
 
-    // Check for GitHub-style branch URLs
-    const githubBranchMatch = trimmed.match(/^(https?:\/\/github\.com\/[^/]+\/[^/]+)\/tree\/(.+?)\/?$/);
-    if (githubBranchMatch) {
-      const baseUrl = githubBranchMatch[1];
-      const branchName = githubBranchMatch[2];
-      return {
-        url: baseUrl.endsWith('.git') ? baseUrl : `${baseUrl}.git`,
-        branch: branchName
-      };
-    }
+      // Check for GitHub-style branch URLs
+      const githubBranchMatch = trimmed.match(
+        /^(https?:\/\/github\.com\/[^/]+\/[^/]+)\/tree\/(.+?)\/?$/,
+      );
+      if (githubBranchMatch) {
+        const baseUrl = githubBranchMatch[1];
+        const branchName = githubBranchMatch[2];
+        return {
+          url: baseUrl.endsWith('.git') ? baseUrl : `${baseUrl}.git`,
+          branch: branchName,
+        };
+      }
 
-    // Otherwise treat as plain repo URL
-    return { url: trimmed, branch: branch.trim() || undefined };
-  }, [branch]);
+      // Otherwise treat as plain repo URL
+      return { url: trimmed, branch: branch.trim() || undefined };
+    },
+    [branch],
+  );
 
   /* scan from GitHub URL */
   const handleScan = useCallback(async () => {
@@ -356,13 +370,13 @@ export default function Home() {
 
     setIsScanning(true);
     setError(null);
-    setScanMessage("Starting...");
-    setScanPhase("discovering");
+    setScanMessage('Starting...');
+    setScanPhase('discovering');
 
     try {
-      const res = await fetch("/api/clone-and-scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+      const res = await fetch('/api/clone-and-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url, branch: parsedBranch, forceRescan }),
       });
 
@@ -373,16 +387,16 @@ export default function Home() {
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
-      let buffer = "";
-      let outputPath = "";
+      let buffer = '';
+      let outputPath = '';
 
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
         for (const line of lines) {
           if (!line.trim()) continue;
@@ -391,10 +405,10 @@ export default function Home() {
             setScanPhase(progress.phase);
             setScanMessage(progress.message);
 
-            if (progress.phase === "done" && progress.summary) {
+            if (progress.phase === 'done' && progress.summary) {
               outputPath = progress.summary.outputPath;
             }
-            if (progress.phase === "error") {
+            if (progress.phase === 'error') {
               throw new Error(progress.message);
             }
           } catch (e) {
@@ -404,9 +418,9 @@ export default function Home() {
       }
 
       if (outputPath) {
-        const loadRes = await fetch("/api/load-graph", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        const loadRes = await fetch('/api/load-graph', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ path: outputPath }),
         });
         if (loadRes.ok) {
@@ -415,15 +429,15 @@ export default function Home() {
           localStorage.setItem(STORAGE_KEYS.GRAPH, JSON.stringify(data));
           localStorage.setItem(STORAGE_KEYS.GITHUB_URL, url);
         } else {
-          throw new Error("Scan completed but failed to load graph");
+          throw new Error('Scan completed but failed to load graph');
         }
       }
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setIsScanning(false);
-      setScanPhase("");
-      setScanMessage("");
+      setScanPhase('');
+      setScanMessage('');
     }
   }, [githubUrl, forceRescan, parseGitInput]);
 
@@ -439,7 +453,7 @@ export default function Home() {
         localStorage.setItem(STORAGE_KEYS.GRAPH, JSON.stringify(data));
         setError(null);
       } catch {
-        setError("Invalid JSON file");
+        setError('Invalid JSON file');
       }
     };
     reader.readAsText(file);
@@ -448,11 +462,11 @@ export default function Home() {
   /* canvas interactions */
   const handleCanvasMouseDown = useCallback(
     (e: React.MouseEvent) => {
-      if ((e.target as HTMLElement).closest("[data-node]")) return;
+      if ((e.target as HTMLElement).closest('[data-node]')) return;
       setIsPanning(true);
       panStart.current = { x: e.clientX, y: e.clientY, tx, ty };
     },
-    [tx, ty]
+    [tx, ty],
   );
 
   const handleCanvasMouseMove = useCallback(
@@ -464,7 +478,7 @@ export default function Home() {
       setTx(newTx);
       setTy(newTy);
     },
-    [isPanning]
+    [isPanning],
   );
 
   const handleCanvasMouseUp = useCallback(() => setIsPanning(false), []);
@@ -483,7 +497,10 @@ export default function Home() {
     }
 
     // Calculate bounding box of all nodes
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    let minX = Infinity,
+      minY = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity;
     positions.forEach(({ x, y }) => {
       minX = Math.min(minX, x);
       minY = Math.min(minY, y);
@@ -495,12 +512,11 @@ export default function Home() {
     const graphHeight = maxY - minY;
 
     // Get viewport dimensions (accounting for sidebar)
-    const viewportWidth = typeof window !== 'undefined' 
-      ? window.innerWidth - (isSidebarCollapsed ? 0 : sidebarWidth) 
-      : 1200;
-    const viewportHeight = typeof window !== 'undefined' 
-      ? window.innerHeight 
-      : 800;
+    const viewportWidth =
+      typeof window !== 'undefined'
+        ? window.innerWidth - (isSidebarCollapsed ? 0 : sidebarWidth)
+        : 1200;
+    const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 800;
 
     // Add padding around the graph
     const padding = 60;
@@ -536,17 +552,18 @@ export default function Home() {
 
   const exportGraph = useCallback(() => {
     if (!graph) return;
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(graph, null, 2));
-    const downloadAnchorNode = document.createElement("a");
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", "servicelab.tracelab.json");
+    const dataStr =
+      'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(graph, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute('href', dataStr);
+    downloadAnchorNode.setAttribute('download', 'servicelab.tracelab.json');
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
   }, [graph]);
 
   const handleNodeDrag = useCallback((nodeId: string, x: number, y: number) => {
-    setPositions(prev => {
+    setPositions((prev) => {
       const next = new Map(prev);
       next.set(nodeId, { x, y });
       return next;
@@ -554,14 +571,11 @@ export default function Home() {
   }, []);
 
   const handleCanvasClick = useCallback((e: React.MouseEvent) => {
-    if (!(e.target as HTMLElement).closest("[data-node]")) setSelectedId(null);
+    if (!(e.target as HTMLElement).closest('[data-node]')) setSelectedId(null);
   }, []);
 
   /* node lookup */
-  const nodeById = useCallback(
-    (id: string) => coreNodes.find((n) => n.id === id),
-    [coreNodes]
-  );
+  const nodeById = useCallback((id: string) => coreNodes.find((n) => n.id === id), [coreNodes]);
 
   const nodeMap = useMemo(() => {
     const m = new Map<string, ComponentNode>();
@@ -583,7 +597,15 @@ export default function Home() {
     let payload: Record<string, unknown> = {};
     try {
       payload = JSON.parse(reqBody) as Record<string, unknown>;
-    } catch { /* empty */ }
+    } catch {
+      /* empty */
+    }
+
+    // Merge path params into payload so output_cases can match on them
+    const filledParams = Object.entries(pathParams).filter(([, v]) => v !== '');
+    if (filledParams.length > 0) {
+      payload = { ...Object.fromEntries(filledParams), ...payload };
+    }
 
     const resolved = resolveTrace(graph, traceRouteId, payload);
 
@@ -599,7 +621,9 @@ export default function Home() {
     for (const s of resolvedStepDefs) {
       const node = nodeMap.get(s.node_id);
       const inputPayload = currentPayload;
-      const resolved = node ? resolveNodeOutput(node, inputPayload) : { output: inputPayload, terminates: false };
+      const resolved = node
+        ? resolveNodeOutput(node, inputPayload)
+        : { output: inputPayload, terminates: false };
       currentPayload = resolved.output;
       steps.push({
         nodeId: s.node_id,
@@ -612,7 +636,9 @@ export default function Home() {
         inputPayload,
         outputPayload: resolved.output,
         terminated: resolved.terminates,
-        terminatedReason: resolved.terminates ? (resolved.explanation ?? 'Execution terminated at this step') : undefined,
+        terminatedReason: resolved.terminates
+          ? (resolved.explanation ?? 'Execution terminated at this step')
+          : undefined,
       });
       if (resolved.terminates) break; // stop — this node rejected/errored
     }
@@ -637,7 +663,7 @@ export default function Home() {
 
     setIsTracing(false);
     setTimeout(() => setTraceHeadId(null), TRACE_HEAD_CLEAR_DELAY);
-  }, [traceRouteId, graph, nodeMap, reqBody, breakpoints]);
+  }, [traceRouteId, graph, nodeMap, reqBody, pathParams, breakpoints]);
 
   const resumeSimulation = useCallback(async () => {
     if (!traceSteps.length || traceVisible >= traceSteps.length) return;
@@ -698,63 +724,70 @@ export default function Home() {
    * Step N>0 = intermediate payload → keep current trace, recompute outputs in-place
    *   using each node's output_cases so the chain reacts deterministically.
    */
-  const rerunFromStep = useCallback((stepIndex: number, nodeId: string, newInput: unknown) => {
-    if (!graph || !traceRouteId) return;
+  const rerunFromStep = useCallback(
+    (stepIndex: number, nodeId: string, newInput: unknown) => {
+      if (!graph || !traceRouteId) return;
 
-    // Helper: recompute outputs from a start index, stopping if a step terminates
-    const recompute = (steps: TraceStep[], fromIdx: number, input: unknown): TraceStep[] => {
-      const result = steps.slice(0, fromIdx);
-      let current = input;
-      for (let i = fromIdx; i < steps.length; i++) {
-        const node = nodeMap.get(steps[i].nodeId);
-        const res = node ? resolveNodeOutput(node, current) : { output: current, terminates: false };
-        result.push({
-          ...steps[i],
-          inputPayload: current,
-          outputPayload: res.output,
-          terminated: res.terminates,
-          terminatedReason: res.terminates ? (res.explanation ?? 'Execution terminated at this step') : undefined,
+      // Helper: recompute outputs from a start index, stopping if a step terminates
+      const recompute = (steps: TraceStep[], fromIdx: number, input: unknown): TraceStep[] => {
+        const result = steps.slice(0, fromIdx);
+        let current = input;
+        for (let i = fromIdx; i < steps.length; i++) {
+          const node = nodeMap.get(steps[i].nodeId);
+          const res = node
+            ? resolveNodeOutput(node, current)
+            : { output: current, terminates: false };
+          result.push({
+            ...steps[i],
+            inputPayload: current,
+            outputPayload: res.output,
+            terminated: res.terminates,
+            terminatedReason: res.terminates
+              ? (res.explanation ?? 'Execution terminated at this step')
+              : undefined,
+          });
+          if (res.terminates) break; // chain stops here
+          current = res.output;
+        }
+        return result;
+      };
+
+      // ── Step 0: the user edited the request body itself ──
+      if (stepIndex === 0) {
+        const resolved = resolveTrace(graph, traceRouteId, newInput);
+
+        if (!resolved) {
+          setTraceSteps((prev) => recompute(prev, 0, newInput));
+          return;
+        }
+
+        // Build new step list from the resolved trace
+        const templateSteps: TraceStep[] = resolved.steps.map((s) => {
+          const node = nodeMap.get(s.node_id);
+          return {
+            nodeId: s.node_id,
+            name: node?.name || s.node_id,
+            kind: node?.kind || 'function',
+            description: s.summary,
+            edgeLabel: s.edge_label,
+            inputType: node?.input ?? null,
+            outputType: node?.output ?? null,
+          };
         });
-        if (res.terminates) break; // chain stops here
-        current = res.output;
-      }
-      return result;
-    };
 
-    // ── Step 0: the user edited the request body itself ──
-    if (stepIndex === 0) {
-      const resolved = resolveTrace(graph, traceRouteId, newInput);
-
-      if (!resolved) {
-        setTraceSteps((prev) => recompute(prev, 0, newInput));
+        const newSteps = recompute(templateSteps, 0, newInput);
+        setTraceSteps(newSteps);
+        setTraceVisible(newSteps.length);
+        setActiveTraceIds(new Set(newSteps.map((s) => s.nodeId)));
         return;
       }
 
-      // Build new step list from the resolved trace
-      const templateSteps: TraceStep[] = resolved.steps.map((s) => {
-        const node = nodeMap.get(s.node_id);
-        return {
-          nodeId: s.node_id,
-          name: node?.name || s.node_id,
-          kind: node?.kind || 'function',
-          description: s.summary,
-          edgeLabel: s.edge_label,
-          inputType: node?.input ?? null,
-          outputType: node?.output ?? null,
-        };
-      });
-
-      const newSteps = recompute(templateSteps, 0, newInput);
-      setTraceSteps(newSteps);
-      setTraceVisible(newSteps.length);
-      setActiveTraceIds(new Set(newSteps.map((s) => s.nodeId)));
-      return;
-    }
-
-    // ── Step N > 0: intermediate payload edit ──
-    // Keep current trace path, recompute from stepIndex. Stops if a node terminates.
-    setTraceSteps((prev) => recompute(prev, stepIndex, newInput));
-  }, [graph, traceRouteId, nodeMap]);
+      // ── Step N > 0: intermediate payload edit ──
+      // Keep current trace path, recompute from stepIndex. Stops if a node terminates.
+      setTraceSteps((prev) => recompute(prev, stepIndex, newInput));
+    },
+    [graph, traceRouteId, nodeMap],
+  );
 
   /* landing screen */
   if (!graph) {
@@ -777,10 +810,13 @@ export default function Home() {
   }
 
   /* graph visualizer */
-  const selectedNode = selectedId ? (nodeById(selectedId) || null) : null;
+  const selectedNode = selectedId ? nodeById(selectedId) || null : null;
 
   return (
-    <div className="bg-[#0d0d0f] h-screen flex overflow-hidden" style={{ userSelect: isResizing ? "none" : "auto" }}>
+    <div
+      className="bg-[#0d0d0f] h-screen flex overflow-hidden"
+      style={{ userSelect: isResizing ? 'none' : 'auto' }}
+    >
       <style>{`
         @keyframes dash { to { stroke-dashoffset: -18; } }
         @keyframes pulse {
@@ -809,20 +845,19 @@ export default function Home() {
         className="flex w-full h-full"
         style={{
           animation: isGraphUnloading
-            ? "fadeOutBlur 0.4s ease-out"
+            ? 'fadeOutBlur 0.4s ease-out'
             : isGraphLoaded
-              ? "fadeInBlur 0.6s ease-out"
-              : "none",
+              ? 'fadeInBlur 0.6s ease-out'
+              : 'none',
           opacity: isGraphUnloading ? 0 : isGraphLoaded ? 1 : 0,
-          filter: isGraphUnloading ? "blur(8px)" : isGraphLoaded ? "blur(0px)" : "blur(8px)",
+          filter: isGraphUnloading ? 'blur(8px)' : isGraphLoaded ? 'blur(0px)' : 'blur(8px)',
         }}
       >
-
         <div
           className="h-full flex overflow-hidden"
           style={{
             width: isSidebarCollapsed ? 0 : sidebarWidth,
-            transition: "width 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+            transition: 'width 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
             opacity: isSidebarCollapsed ? 0 : 1,
           }}
         >
@@ -863,9 +898,13 @@ export default function Home() {
           <div
             onMouseDown={handleResizeStart}
             className="w-1 cursor-col-resize transition-colors duration-150 z-20 shrink-0 h-full"
-            style={{ background: isResizing ? "#378ADD" : "transparent" }}
-            onMouseEnter={(e) => { (e.target as HTMLElement).style.background = "#333"; }}
-            onMouseLeave={(e) => { if (!isResizing) (e.target as HTMLElement).style.background = "transparent"; }}
+            style={{ background: isResizing ? '#378ADD' : 'transparent' }}
+            onMouseEnter={(e) => {
+              (e.target as HTMLElement).style.background = '#333';
+            }}
+            onMouseLeave={(e) => {
+              if (!isResizing) (e.target as HTMLElement).style.background = 'transparent';
+            }}
           />
         )}
 

@@ -13,16 +13,26 @@ function getField(payload: unknown, field: string): unknown {
 export function evaluateCondition(cond: StepCondition, payload: unknown): boolean {
   const fieldValue = getField(payload, cond.field);
   switch (cond.op) {
-    case 'eq': return fieldValue === cond.value;
-    case 'neq': return fieldValue !== cond.value;
-    case 'in': return Array.isArray(cond.value) && cond.value.includes(String(fieldValue));
-    case 'not_in': return Array.isArray(cond.value) && !cond.value.includes(String(fieldValue));
-    case 'exists': return fieldValue !== undefined && fieldValue !== null;
-    case 'not_exists': return fieldValue === undefined || fieldValue === null;
-    case 'eq_field': return typeof cond.value === 'string' && fieldValue === getField(payload, cond.value);
-    case 'neq_field': return typeof cond.value === 'string' && fieldValue !== getField(payload, cond.value);
-    case 'eq_type': return typeof fieldValue === String(cond.value);
-    default: return true;
+    case 'eq':
+      return fieldValue === cond.value;
+    case 'neq':
+      return fieldValue !== cond.value;
+    case 'in':
+      return Array.isArray(cond.value) && cond.value.includes(String(fieldValue));
+    case 'not_in':
+      return Array.isArray(cond.value) && !cond.value.includes(String(fieldValue));
+    case 'exists':
+      return fieldValue !== undefined && fieldValue !== null;
+    case 'not_exists':
+      return fieldValue === undefined || fieldValue === null;
+    case 'eq_field':
+      return typeof cond.value === 'string' && fieldValue === getField(payload, cond.value);
+    case 'neq_field':
+      return typeof cond.value === 'string' && fieldValue !== getField(payload, cond.value);
+    case 'eq_type':
+      return typeof fieldValue === String(cond.value);
+    default:
+      return true;
   }
 }
 
