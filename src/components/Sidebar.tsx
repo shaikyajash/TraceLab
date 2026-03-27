@@ -575,14 +575,11 @@ export default function Sidebar(props: SidebarProps) {
                         <Button
                           onClick={() => {
                             try {
-                              const inputToUse = stepInputEdits[expandedStep] ??
+                              const inputToUse =
+                                stepInputEdits[expandedStep] ??
                                 JSON.stringify(traceSteps[expandedStep].inputPayload);
                               const parsed = JSON.parse(inputToUse);
-                              rerunFromStep(
-                                expandedStep,
-                                traceSteps[expandedStep].nodeId,
-                                parsed,
-                              );
+                              rerunFromStep(expandedStep, traceSteps[expandedStep].nodeId, parsed);
                               // Clear edits for this step and all later steps
                               setStepInputEdits((prev) => {
                                 const n = { ...prev };
@@ -679,12 +676,13 @@ export default function Sidebar(props: SidebarProps) {
                   <span>TRACE FLOW</span>
                   {traceSteps.length > 0 && (
                     <span
-                      className={`tracking-normal ${traceSteps.some((s) => s.terminated)
+                      className={`tracking-normal ${
+                        traceSteps.some((s) => s.terminated)
                           ? 'text-[#f59e0b]'
                           : !isTracing && traceVisible > 0 && traceVisible === traceSteps.length
                             ? 'text-[#378ADD]'
                             : 'text-[#555]'
-                        }`}
+                      }`}
                     >
                       {traceVisible} / {traceSteps.length}
                     </span>
@@ -724,8 +722,9 @@ export default function Sidebar(props: SidebarProps) {
                           <div className="relative pt-2">
                             {/* Step number bubble - centered on top edge, more inside */}
                             <div
-                              className={`absolute left-1/2 -translate-x-1/2 -top-2 w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] text-white ${step.terminated ? 'bg-[#f59e0b]' : 'bg-[#378ADD]'
-                                }`}
+                              className={`absolute left-1/2 -translate-x-1/2 -top-2 w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] text-white ${
+                                step.terminated ? 'bg-[#f59e0b]' : 'bg-[#378ADD]'
+                              }`}
                             >
                               {i + 1}
                             </div>

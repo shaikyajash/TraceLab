@@ -812,7 +812,13 @@ function validateSchemaAlignment(result: PerServiceResult): ValidationError[] {
         errors.push({
           severity: 'error',
           category: 'structure',
-          message: `Schema misalignment in trace "${trace.label}" step ${s}: node "${currNode.id}" needs [${missingFields.join(', ')}] but upstream "${prevNode.id}" outputs [${Array.from(upstreamKeys).filter((k) => !k.includes('.')).join(', ')}]. Add input_mapping to this trace step to extract the right fields, or fix the upstream output to include them.`,
+          message: `Schema misalignment in trace "${trace.label}" step ${s}: node "${currNode.id}" needs [${missingFields.join(', ')}] but upstream "${prevNode.id}" outputs [${Array.from(
+            upstreamKeys,
+          )
+            .filter((k) => !k.includes('.'))
+            .join(
+              ', ',
+            )}]. Add input_mapping to this trace step to extract the right fields, or fix the upstream output to include them.`,
           path: `trace "${trace.label}" step ${s}`,
         });
       }

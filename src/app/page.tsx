@@ -10,7 +10,7 @@ import type {
   TraceStepDef,
 } from '@/types';
 import { resolveTrace } from '@/lib/trace-resolver';
-import { resolveNodeOutput, applyInputMapping } from '@/lib/simulation';
+import { resolveNodeOutput, adaptInput } from '@/lib/simulation';
 import {
   CORE_KINDS,
   NODE_W,
@@ -187,9 +187,15 @@ export default function Home() {
   const resolvedStepDefsRef = useRef<TraceStepDef[]>([]);
 
   // Keep refs in sync with state
-  useEffect(() => { traceStepsRef.current = traceSteps; }, [traceSteps]);
-  useEffect(() => { traceVisibleRef.current = traceVisible; }, [traceVisible]);
-  useEffect(() => { breakpointsRef.current = breakpoints; }, [breakpoints]);
+  useEffect(() => {
+    traceStepsRef.current = traceSteps;
+  }, [traceSteps]);
+  useEffect(() => {
+    traceVisibleRef.current = traceVisible;
+  }, [traceVisible]);
+  useEffect(() => {
+    breakpointsRef.current = breakpoints;
+  }, [breakpoints]);
 
   /* request builder */
   const [pathParams, setPathParams] = useState<Record<string, string>>({});
@@ -670,9 +676,9 @@ export default function Home() {
     const steps: TraceStep[] = [];
     for (const s of resolvedStepDefs) {
       const node = nodeMap.get(s.node_id);
-      // Apply input_mapping: transform prev output into what this node expects
-      const inputPayload = s.input_mapping
-        ? applyInputMapping(currentPayload, s.input_mapping)
+      // Adapt previous output to fit this node's expected input shape
+      const inputPayload = node
+        ? adaptInput(currentPayload, node, s.input_mapping)
         : currentPayload;
       const resolved = node
         ? resolveNodeOutput(node, inputPayload)
@@ -734,8 +740,18 @@ export default function Home() {
       if (lastStep && !lastStep.terminated) {
         // Last step is no longer terminated (was edited), extend the chain
         const fullTemplate = buildFullTemplate(resolvedStepDefsRef.current, nodeMap);
-        const extended = recomputeFromStep(fullTemplate, steps.length, lastStep.outputPayload, nodeMap);
-        const allSteps = [...steps.slice(0, steps.length).map(s => ({ ...s, terminated: false, terminatedReason: undefined })), ...extended];
+        const extended = recomputeFromStep(
+          fullTemplate,
+          steps.length,
+          lastStep.outputPayload,
+          nodeMap,
+        );
+        const allSteps = [
+          ...steps
+            .slice(0, steps.length)
+            .map((s) => ({ ...s, terminated: false, terminatedReason: undefined })),
+          ...extended,
+        ];
         setTraceSteps(allSteps);
         traceStepsRef.current = allSteps;
         // Animate from where we left off
@@ -817,7 +833,10 @@ export default function Home() {
   }, []);
 
   /** Build a full template of TraceStep objects from resolvedStepDefs (no I/O computed) */
-  function buildFullTemplate(stepDefs: TraceStepDef[], nodeMap: Map<string, ComponentNode>): TraceStep[] {
+  function buildFullTemplate(
+    stepDefs: TraceStepDef[],
+    nodeMap: Map<string, ComponentNode>,
+  ): TraceStep[] {
     return stepDefs.map((s) => {
       const node = nodeMap.get(s.node_id);
       return {
@@ -843,12 +862,12 @@ export default function Home() {
     let current = input;
     for (let i = fromIdx; i < templateSteps.length; i++) {
       const node = nodeMap.get(templateSteps[i].nodeId);
-      const res = node
-        ? resolveNodeOutput(node, current)
-        : { output: current, terminates: false };
+      // Adapt previous output to fit this node's expected input
+      const adapted = node ? adaptInput(current, node) : current;
+      const res = node ? resolveNodeOutput(node, adapted) : { output: adapted, terminates: false };
       result.push({
         ...templateSteps[i],
-        inputPayload: current,
+        inputPayload: adapted,
         outputPayload: res.output,
         terminated: res.terminates,
         terminatedReason: res.terminates
@@ -876,12 +895,16 @@ export default function Home() {
         let current = input;
         for (let i = fromIdx; i < steps.length; i++) {
           const node = nodeMap.get(steps[i].nodeId);
+          const stepDef = resolvedStepDefsRef.current?.[i];
+          // Adapt previous output to fit this node's expected input shape
+          const inputPayload =
+            node && stepDef ? adaptInput(current, node, stepDef.input_mapping) : current;
           const res = node
-            ? resolveNodeOutput(node, current)
-            : { output: current, terminates: false, explanation: undefined };
+            ? resolveNodeOutput(node, inputPayload)
+            : { output: inputPayload, terminates: false, explanation: undefined };
           result.push({
             ...steps[i],
-            inputPayload: current,
+            inputPayload,
             outputPayload: res.output,
             terminated: res.terminates,
             terminatedReason: res.terminates
@@ -902,7 +925,7 @@ export default function Home() {
           resolvedStepDefsRef.current = resolved.steps;
         }
 
-        const newSteps = recompute(0, newInput);
+        const newSteps = recompute(traceStepsRef.current, 0, newInput);
         setTraceSteps(newSteps);
         traceStepsRef.current = newSteps;
         setTraceVisible(0);
@@ -940,7 +963,7 @@ export default function Home() {
       // We DO NOT advance traceVisible or clear isPausedAtBreakpoint here.
       // This allows the user to see the newly computed output for the current step
       // while remaining paused, until they explicitly click "Resume".
-      const newSteps = recompute(stepIndex, newInput);
+      const newSteps = recompute(traceStepsRef.current, stepIndex, newInput);
       setTraceSteps(newSteps);
       traceStepsRef.current = newSteps;
     },

@@ -2,12 +2,7 @@ import { ComponentNode, InputFieldSchema, SimulationStep, TraceStepDef } from '.
 import { matchesAll, evaluateCondition } from './conditions';
 
 /**
- * Apply input_mapping to transform the previous step's output into
- * the shape this step's node expects.
- *
- * Example: prev output = {orders: [{create_order: {create_id: "x"}, source_swap: {...}}]}
- * mapping = {"create_order": "orders[0].create_order", "source_swap": "orders[0].source_swap"}
- * result = {create_order: {create_id: "x"}, source_swap: {...}}
+ * Apply explicit input_mapping to transform the previous step's output.
  */
 export function applyInputMapping(prevOutput: unknown, mapping: Record<string, string>): unknown {
   const result: Record<string, unknown> = {};
@@ -15,6 +10,188 @@ export function applyInputMapping(prevOutput: unknown, mapping: Record<string, s
     result[targetField] = getFieldValue(prevOutput, sourcePath);
   }
   return result;
+}
+
+/**
+ * Automatically adapt the previous step's output to fit the next node's expected input.
+ *
+ * Strategy:
+ * 1. If node has explicit input_mapping on the trace step → use that (highest priority)
+ * 2. If node has input_schema → build a NEW object with ONLY the fields the schema expects,
+ *    intelligently extracting values from prevOutput (nested search)
+ * 3. If node has output_cases with match conditions → build object with fields they check
+ * 4. Parse the node's input type signature to understand expected structure
+ * 5. Fallback: pass through prevOutput as-is
+ *
+ * The key insight: we DON'T just carry forward all previous fields. Instead, we build
+ * a FRESH object that matches the expected input structure, populating it with data
+ * from prevOutput wherever we can find it.
+ */
+export function adaptInput(
+  prevOutput: unknown,
+  node: ComponentNode,
+  stepMapping?: Record<string, string>,
+): unknown {
+  // Priority 1: explicit input_mapping
+  if (stepMapping && Object.keys(stepMapping).length > 0) {
+    return applyInputMapping(prevOutput, stepMapping);
+  }
+
+  if (typeof prevOutput !== 'object' || prevOutput === null || Array.isArray(prevOutput)) {
+    return prevOutput;
+  }
+
+  const prev = prevOutput as Record<string, unknown>;
+
+  // Priority 2: auto-adapt using input_schema (BUILD expected structure)
+  if (node.input_schema && node.input_schema.length > 0) {
+    const adapted: Record<string, unknown> = {};
+
+    for (const field of node.input_schema) {
+      const rootKey = field.field.split('.')[0].split('[')[0];
+
+      // First check if the field exists at root level in prevOutput
+      if (rootKey in prev) {
+        adapted[rootKey] = prev[rootKey];
+        continue;
+      }
+
+      // Search for the field in nested structures
+      const found = deepFind(prev, rootKey);
+      if (found !== undefined) {
+        adapted[rootKey] = found;
+        continue;
+      }
+
+      // If required field not found, leave it undefined (validation will catch it)
+      // If optional, skip it
+      if (field.required) {
+        adapted[rootKey] = undefined;
+      }
+    }
+
+    return adapted;
+  }
+
+  // Priority 3: Parse input type signature to understand expected structure
+  if (node.input) {
+    const expectedFields = extractFieldsFromTypeSignature(node.input);
+    if (expectedFields.length > 0) {
+      const adapted: Record<string, unknown> = {};
+
+      for (const fieldName of expectedFields) {
+        // Check if field exists at root level
+        if (fieldName in prev) {
+          adapted[fieldName] = prev[fieldName];
+          continue;
+        }
+
+        // Deep search for the field
+        const found = deepFind(prev, fieldName);
+        if (found !== undefined) {
+          adapted[fieldName] = found;
+        }
+      }
+
+      return adapted;
+    }
+  }
+
+  // Priority 4: auto-adapt using output_cases match conditions
+  if (node.output_cases && node.output_cases.length > 0) {
+    const adapted: Record<string, unknown> = {};
+    const fieldsNeeded = new Set<string>();
+
+    for (const oc of node.output_cases) {
+      if (!oc.match) continue;
+      for (const cond of oc.match) {
+        if (!cond.field) continue;
+        const rootKey = cond.field.split('.')[0].split('[')[0];
+        fieldsNeeded.add(rootKey);
+      }
+    }
+
+    for (const rootKey of fieldsNeeded) {
+      if (rootKey in prev) {
+        adapted[rootKey] = prev[rootKey];
+        continue;
+      }
+
+      const found = deepFind(prev, rootKey);
+      if (found !== undefined) {
+        adapted[rootKey] = found;
+      }
+    }
+
+    if (Object.keys(adapted).length > 0) {
+      return adapted;
+    }
+  }
+
+  return prevOutput;
+}
+
+/**
+ * Extract field names from a type signature string.
+ * Examples:
+ *   "CreateOrderRequest" → []
+ *   "{url: string, chains: Chain[]}" → ["url", "chains"]
+ *   "{create_order: MatchedOrderVerbose, source_swap: SwapInfo}" → ["create_order", "source_swap"]
+ */
+function extractFieldsFromTypeSignature(typeStr: string): string[] {
+  const trimmed = typeStr.trim();
+
+  // If it's just a type name (no braces), we can't extract fields
+  if (!trimmed.includes('{')) {
+    return [];
+  }
+
+  // Extract content between first { and last }
+  const match = trimmed.match(/\{([^}]+)\}/);
+  if (!match) return [];
+
+  const content = match[1];
+  const fields: string[] = [];
+
+  // Split by comma, but be careful of nested types
+  const parts = content.split(',');
+  for (const part of parts) {
+    const fieldMatch = part.trim().match(/^(\w+)\s*:/);
+    if (fieldMatch) {
+      fields.push(fieldMatch[1]);
+    }
+  }
+
+  return fields;
+}
+
+/**
+ * Deep-search an object for a key, looking inside nested objects and arrays.
+ * Returns the first match found.
+ */
+function deepFind(obj: unknown, key: string, maxDepth = 4): unknown {
+  if (maxDepth <= 0) return undefined;
+  if (typeof obj !== 'object' || obj === null) return undefined;
+
+  if (!Array.isArray(obj)) {
+    const record = obj as Record<string, unknown>;
+    if (key in record) return record[key];
+    // Search nested objects
+    for (const v of Object.values(record)) {
+      if (typeof v === 'object' && v !== null) {
+        const found = deepFind(v, key, maxDepth - 1);
+        if (found !== undefined) return found;
+      }
+    }
+  } else {
+    // Search first array element
+    if (obj.length > 0) {
+      const found = deepFind(obj[0], key, maxDepth - 1);
+      if (found !== undefined) return found;
+    }
+  }
+
+  return undefined;
 }
 
 export interface ResolvedOutput {

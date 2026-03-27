@@ -603,7 +603,11 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 }}
                 disabled={!isPausedAtBreakpoint || traceSteps[traceVisible - 1]?.terminated}
                 className="bg-[#378ADD] hover:bg-[#4a9bef] text-white px-4 py-2 rounded-md text-[10px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                title={traceSteps[traceVisible - 1]?.terminated ? "Fix errors in the current step before resuming" : "Resume simulation from breakpoint"}
+                title={
+                  traceSteps[traceVisible - 1]?.terminated
+                    ? 'Fix errors in the current step before resuming'
+                    : 'Resume simulation from breakpoint'
+                }
               >
                 {traceSteps[traceVisible - 1]?.terminated ? 'Fix issues before resuming' : 'Resume'}
               </button>
