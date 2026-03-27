@@ -200,40 +200,90 @@ RULE 7 — NODE OUTPUT CASES (output_cases)
 
 output_cases let a node return different output values depending on the input payload —
 same condition system as trace match. This powers per-step input editing in the simulator:
-when the user changes a step's input, the output updates deterministically.
+when the user changes a step's input at step N, the output updates deterministically,
+that output flows into step N+1 as its input, N+1's output_cases fire, and so on down the
+entire chain. Every node in the call chain MUST have output_cases that react to
+the data it actually receives — this is how the simulator stays deterministic without AI.
 
 WHEN TO ADD output_cases:
-  - route_handler:    always — it can return success OR error responses
-  - business_logic:   when its return value changes shape based on input (e.g. Ok(data) vs Err)
-  - external_http_call / db_call: when it can return data OR an error object
-  - validator:        when it returns Ok(()) vs Err("reason") depending on input
-  - transformer:      only if the output shape genuinely differs between input formats
+  Add output_cases on every node whose output can vary (any node that appears in a trace
+  except struct/enum/background_process). Add as many cases as the node's actual logic
+  requires — one per distinct code path through the function.
   - struct / enum / background_process: SKIP — they have no dynamic output
+  - If a node truly always returns the same value regardless of input, use example_output.
+
+╔══════════════════════════════════════════════════════════════════╗
+║  CRITICAL — CHAIN-AWARE CONDITIONS                              ║
+║                                                                  ║
+║  output_cases are evaluated against the INPUT payload flowing    ║
+║  INTO that node — which is the PREVIOUS step's OUTPUT, NOT the  ║
+║  original request body.                                          ║
+║                                                                  ║
+║  Before writing output_cases for a node, ask:                    ║
+║    "What does the UPSTREAM node output? What fields does         ║
+║     THAT output have? My conditions must match THOSE fields."    ║
+║                                                                  ║
+║  Example chain:                                                  ║
+║    route_handler outputs: {"action": "create", "data": {...}}    ║
+║    → validator receives that, checks "action" field              ║
+║    → validator outputs: {"ok": true, "data": {...}}              ║
+║    → business_logic receives THAT, checks "ok" field             ║
+║    → business_logic outputs: {"result": {...}} or {"error": ..}  ║
+║    → db_call receives THAT, checks "result" field                ║
+║                                                                  ║
+║  WRONG: db_call checking {"field": "action", "op": "eq", ...}   ║
+║         — "action" is in the request body, not in what db_call   ║
+║           receives from business_logic                           ║
+║  RIGHT: db_call checking {"field": "result", "op": "exists"}    ║
+║         — "result" is what business_logic actually outputs       ║
+╚══════════════════════════════════════════════════════════════════╝
 
 FORMAT:
   "output_cases": [
     {
-      "match": [{"field": "chains[0].solver_id", "op": "exists"}],
-      "output": {"ok": true, "result": "registered"},
-      "explanation": "Current format succeeded"
+      "match": [{"field": "token", "op": "exists"}],
+      "output": {"authorized": true, "user_id": "usr_123", "data": "...forwarded..."},
+      "explanation": "Token present — authorized, continue chain"
     },
     {
       "match": [],
-      "output": {"ok": false, "error": "Invalid request format"},
-      "explanation": "Catch-all — deserialization failed or unknown format"
+      "output": {"authorized": false, "status": 401},
+      "explanation": "No token — rejected",
+      "terminates": true
     }
   ]
+
+  "terminates" field (boolean, optional):
+    Set "terminates": true on any output_case that represents an error, rejection, or
+    early return — e.g. auth failure (401/403), validation error (400), not-found (404).
+    When the simulator hits a terminating output_case, it STOPS the chain at this node.
+    Downstream steps are not executed. This prevents impossible flows like
+    "auth rejected → business logic runs anyway → db call succeeds".
+
+    Add terminates: true when:
+      - middleware rejects (unauthorized, rate-limited)
+      - validator fails (invalid input)
+      - business_logic short-circuits on an error from upstream
+      - db_call / external_http_call returns a fatal error
+      - route_handler returns an error response
+    Do NOT add terminates on success cases — they should continue the chain.
 
 Rules:
   - Same condition ops as trace match: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field, eq_type
   - First case whose match passes wins. match: [] = unconditional catch-all. Put it LAST.
-  - If a node always returns the same value regardless of input, use example_output instead (no output_cases).
   - output value must be a JSON object, array, string, number, boolean, or null — never a string-escaped JSON.
   - Keep output values realistic: use the node's actual return type fields, not placeholder strings.
+  - Success output_cases MUST carry forward enough fields for downstream nodes to evaluate
+    THEIR conditions. If business_logic needs to check "authorized", then middleware's success
+    output must include an "authorized" field.
 
-IMPORTANT: output_cases are evaluated against the INPUT payload flowing INTO that node
-  (which may be the previous step's output in a simulation chain, not the original request body).
-  Write conditions that match the data actually arriving at that node, not the top-level request shape.
+HOW TO WRITE output_cases — step by step:
+  1. Look at this node's incoming edges. What nodes call it? What do they output?
+  2. The fields in those outputs are the fields you can match on in this node's output_cases.
+  3. Write the success case(s): condition on the "happy path" fields from upstream.
+     Output must include fields that DOWNSTREAM nodes will need to match on.
+  4. Write the error/rejection case(s) with "terminates": true.
+  5. Optionally add a catch-all (match: []) as the last case.
 
 ══════════════════════════════════════════════
 RULE 8 — TRACES (most critical section)
@@ -331,9 +381,27 @@ STEP 4 — Parametric traces: avoid combinatorial explosion.
     step_b runs when format=="xml"
   At runtime, only matching steps execute.
 
-STEP 5 — Required catch-all traces (LAST for each route):
-  - "Deserialization failure" trace (match: []) for unknown enum values → 400
-  - "Unauthorized / mismatch" trace (match: []) for wildcard _ arms → 401/403
+STEP 5 — Exactly ONE catch-all trace per route (LAST):
+  ONLY ONE trace per route may have match: [].
+  Every other trace MUST have at least one match condition.
+  Multiple match: [] traces are FORBIDDEN — the resolver picks the first one
+  arbitrarily and the others become unreachable dead code.
+
+  The single catch-all (match: []) = "deserialization failure / unknown input" → 400.
+
+  Other error traces MUST have distinguishing conditions:
+    - "Unauthorized" → match: [{"field": "token", "op": "not_exists"}]
+    - "Unknown action" → match: [{"field": "action", "op": "not_in", "value": ["known1", "known2"]}]
+    - "Wildcard mismatch" → use negated conditions from the specific traces
+
+  WRONG (traces 2+3 unreachable):
+    Trace 1: match: [{"field": "action", "op": "eq", "value": "create"}]
+    Trace 2: match: []  ← "Unauthorized"
+    Trace 3: match: []  ← "Deserialization failure"
+  RIGHT:
+    Trace 1: match: [{"field": "action", "op": "eq", "value": "create"}]
+    Trace 2: match: [{"field": "token", "op": "not_exists"}]  ← "Unauthorized"
+    Trace 3: match: []  ← single catch-all
 
 STEP 6 — Path parameter dispatch:
   /{action} routes → trace per known action value using:
@@ -370,8 +438,11 @@ NODE — all fields required on every node (use null for optional fields with no
                                  Generate based on the return type and source code logic.
                                  null only if return type is () or void.
   "fields"          array|null   enum: [{name, type:"serde-value"}]  struct: [{name, type}]  else: null
-  "output_cases"    array|null   conditional outputs — see Rule 7. null if node always returns the same value.
-                                 Each entry: {"match": [...conditions], "output": <json value>, "explanation": "..."}
+  "output_cases"    array|null   conditional outputs — see Rule 7. Add on every node whose output varies.
+                                 null only if the node truly always returns the same value.
+                                 Each entry: {"match": [...], "output": <value>, "explanation": "...", "terminates": bool}
+                                 "terminates": true on error/rejection cases — stops the simulation chain.
+                                 CONDITIONS MUST MATCH FIELDS FROM THE UPSTREAM NODE'S OUTPUT, not the request body.
                                  match: [] = unconditional catch-all (put last). First matching case wins.
 
 EDGE:
@@ -400,7 +471,7 @@ TRACE:
   "label"           string   human name with distinguishing variant
   "description"     string   one line: path + outcome
   "example_payload" object   JSON object (not string) that triggers this path
-  "match"           array    condition objects; [] for unconditional/catch-all
+  "match"           array    condition objects. MAX ONE trace per route may use []. All others MUST have conditions.
   "steps"           array    ordered step objects
 
 STEP:
@@ -424,33 +495,54 @@ EXAMPLE OUTPUT SHAPE (generic — replace all placeholders with real values)
      "example_payload": "{\"field\":\"value\"}",
      "example_input": {"field": "value"}, "example_output": {"result": "value"}, "fields": null,
      "output_cases": [
-       {"match": [{"field": "field", "op": "exists"}], "output": {"ok": true, "result": "success"}, "explanation": "Valid input"},
-       {"match": [], "output": {"ok": false, "error": "Invalid input"}, "explanation": "Catch-all failure"}
+       {"match": [{"field": "field", "op": "exists"}], "output": {"ok": true, "data": {"field": "value"}}, "explanation": "Valid input — passes data downstream"},
+       {"match": [], "output": {"ok": false, "error": "Invalid input"}, "explanation": "Catch-all failure", "terminates": true}
      ]},
     {"id": "<middleware_id>", "service": "<svc>", "kind": "middleware", "name": "<Name>",
      "input": "Request", "output": "Request with <Ext> or <error>", "mutates_state": false,
      "mutation_target": null, "defined_in": "src/auth.rs", "description": "<desc>",
      "method": null, "path_pattern": null, "handler": null,
      "source_code": "<verbatim>", "example_payload": null,
-     "example_input": {"headers": {"Authorization": "Bearer <token>"}}, "example_output": {"auth_type": "<type>", "user_id": "<id>"}, "fields": null},
+     "example_input": {"headers": {"Authorization": "Bearer <token>"}}, "example_output": {"authorized": true, "user_id": "<id>"}, "fields": null,
+     "output_cases": [
+       {"match": [{"field": "headers.Authorization", "op": "exists"}], "output": {"authorized": true, "user_id": "usr_123"}, "explanation": "Token present — authorized"},
+       {"match": [], "output": {"authorized": false, "status": 401}, "explanation": "No token — rejected", "terminates": true}
+     ]},
     {"id": "<fn_name>", "service": "<svc>", "kind": "business_logic", "name": "<Name>",
      "input": "<type>", "output": "<type>", "mutates_state": false, "mutation_target": null,
      "defined_in": "src/domain.rs", "description": "<desc>", "method": null,
      "path_pattern": null, "handler": null, "source_code": "<verbatim>",
      "example_payload": null,
-     "example_input": {"<input_field>": "<value>"}, "example_output": {"<output_field>": "<value>"}, "fields": null},
+     "example_input": {"authorized": true, "data": {"<field>": "<value>"}},
+     "example_output": {"ok": true, "result": {"<field>": "<value>"}}, "fields": null,
+     "output_cases": [
+       {"match": [{"field": "authorized", "op": "eq", "value": true}], "output": {"ok": true, "result": {"<field>": "<value>"}}, "explanation": "Auth passed — process data"},
+       {"match": [{"field": "authorized", "op": "eq", "value": false}], "output": {"ok": false, "error": "Unauthorized"}, "explanation": "Middleware rejected", "terminates": true},
+       {"match": [], "output": {"ok": false, "error": "Unexpected input shape"}, "explanation": "Catch-all", "terminates": true}
+     ]},
     {"id": "<validate_fn>", "service": "<svc>", "kind": "validator", "name": "<Name>",
      "input": "<type>", "output": "Result<(), <Err>>", "mutates_state": false,
      "mutation_target": null, "defined_in": "src/validate.rs", "description": "<desc>",
      "method": null, "path_pattern": null, "handler": null, "source_code": "<verbatim>",
      "example_payload": null,
-     "example_input": {"<field>": "<valid-value>"}, "example_output": null, "fields": null},
+     "example_input": {"<field>": "<valid-value>"},
+     "example_output": {"ok": true, "data": {"<field>": "<valid-value>"}}, "fields": null,
+     "output_cases": [
+       {"match": [{"field": "<field>", "op": "exists"}], "output": {"ok": true, "data": {"<field>": "<valid-value>"}}, "explanation": "Required field present — valid"},
+       {"match": [], "output": {"ok": false, "error": "<field> is required"}, "explanation": "Missing required field", "terminates": true}
+     ]},
     {"id": "<db_fn>", "service": "<svc>", "kind": "db_call", "name": "<Name>",
      "input": "<params>", "output": "Result<<Record>>", "mutates_state": true,
      "mutation_target": "<table>", "defined_in": "src/store.rs", "description": "<SQL op>",
      "method": null, "path_pattern": null, "handler": null, "source_code": "<verbatim>",
      "example_payload": null,
-     "example_input": {"<param>": "<value>"}, "example_output": {"id": "<id>", "<field>": "<value>"}, "fields": null},
+     "example_input": {"ok": true, "data": {"<param>": "<value>"}},
+     "example_output": {"ok": true, "record": {"id": "<id>", "<field>": "<value>"}}, "fields": null,
+     "output_cases": [
+       {"match": [{"field": "ok", "op": "eq", "value": true}], "output": {"ok": true, "record": {"id": "<id>", "<field>": "<value>"}}, "explanation": "Upstream success — query DB"},
+       {"match": [{"field": "error", "op": "exists"}], "output": {"ok": false, "error": "Skipped — upstream error"}, "explanation": "Upstream failed", "terminates": true},
+       {"match": [], "output": {"ok": false, "error": "DB operation failed"}, "explanation": "Catch-all", "terminates": true}
+     ]},
     {"id": "enum_<Name>", "service": "<svc>", "kind": "enum", "name": "<Name>",
      "input": null, "output": null, "mutates_state": false, "mutation_target": null,
      "defined_in": "src/types.rs",
@@ -618,9 +710,16 @@ STEP 4 — Parametric traces: avoid combinatorial explosion.
     step_b runs when format=="xml"
   At runtime, only matching steps execute.
 
-STEP 5 — Required catch-all traces (LAST for each route):
-  - "Deserialization failure" trace (match: []) for unknown enum values → 400
-  - "Unauthorized / mismatch" trace (match: []) for wildcard _ arms → 401/403
+STEP 5 — Exactly ONE catch-all trace per route (LAST):
+  ONLY ONE trace per route may have match: [].
+  Every other trace MUST have at least one match condition.
+  Multiple match: [] traces are FORBIDDEN — the resolver picks the first one
+  arbitrarily and the others become unreachable.
+
+  The single catch-all (match: []) = "deserialization failure / unknown input" → 400.
+  Other error traces MUST have distinguishing conditions:
+    - "Unauthorized" → match: [{"field": "token", "op": "not_exists"}]
+    - "Unknown action" → match: [{"field": "action", "op": "not_in", "value": [...known...]}]
 
 STEP 6 — Path parameter dispatch:
   /{action} routes → trace per known action value using:
@@ -632,7 +731,7 @@ Trace fields:
   label            short name with distinguishing condition
   description      one line: what this path does and how it ends
   example_payload  JSON object (not string) that triggers this path
-  match            condition array; [] = catch-all
+  match            condition array. MAX ONE trace per route may use []. All others MUST have conditions.
   steps            complete ordered list (see above)
 
 Step fields:

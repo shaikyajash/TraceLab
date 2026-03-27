@@ -31,6 +31,9 @@ export interface TraceStep {
   inputPayload?: unknown;  // example data flowing in (from LLM simulation)
   outputPayload?: unknown; // example data flowing out (from LLM simulation)
   diffSummary?: string;    // what changed between input and output
+  /** True if this step's output_case had terminates: true — chain stopped here */
+  terminated?: boolean;
+  terminatedReason?: string;
 }
 
 export interface Position {

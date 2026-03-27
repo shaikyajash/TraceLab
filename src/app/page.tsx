@@ -595,12 +595,13 @@ export default function Home() {
     const { steps: resolvedStepDefs } = resolved;
 
     let currentPayload: unknown = payload;
-    const steps: TraceStep[] = resolvedStepDefs.map((s) => {
+    const steps: TraceStep[] = [];
+    for (const s of resolvedStepDefs) {
       const node = nodeMap.get(s.node_id);
       const inputPayload = currentPayload;
-      const outputPayload = node ? resolveNodeOutput(node, inputPayload) : inputPayload;
-      currentPayload = outputPayload;
-      return {
+      const resolved = node ? resolveNodeOutput(node, inputPayload) : { output: inputPayload, terminates: false };
+      currentPayload = resolved.output;
+      steps.push({
         nodeId: s.node_id,
         name: node?.name || s.node_id,
         kind: node?.kind || 'function',
@@ -609,9 +610,12 @@ export default function Home() {
         inputType: node?.input ?? null,
         outputType: node?.output ?? null,
         inputPayload,
-        outputPayload,
-      };
-    });
+        outputPayload: resolved.output,
+        terminated: resolved.terminates,
+        terminatedReason: resolved.terminates ? (resolved.explanation ?? 'Execution terminated at this step') : undefined,
+      });
+      if (resolved.terminates) break; // stop — this node rejected/errored
+    }
 
     setTraceSteps(steps);
 
@@ -688,68 +692,68 @@ export default function Home() {
     setCurrentBreakpointId(null);
   }, []);
 
-  /** Re-run payload propagation from a given step with a new input, re-selecting the trace. */
+  /**
+   * Re-run payload propagation from a given step with a new input.
+   * Step 0 = request body → re-resolve trace (input may select a different path).
+   * Step N>0 = intermediate payload → keep current trace, recompute outputs in-place
+   *   using each node's output_cases so the chain reacts deterministically.
+   */
   const rerunFromStep = useCallback((stepIndex: number, nodeId: string, newInput: unknown) => {
     if (!graph || !traceRouteId) return;
 
-    const resolved = resolveTrace(graph, traceRouteId, newInput);
-
-    let relevantStepDefs: TraceStepDef[];
-    let insertAt: number;
-
-    if (resolved) {
-      const newStartIdx = resolved.steps.findIndex((s) => s.node_id === nodeId);
-      if (newStartIdx >= 0) {
-        // Node found in new trace — start the tail from there
-        relevantStepDefs = resolved.steps.slice(newStartIdx);
-        insertAt = stepIndex;
-      } else {
-        // Node not in new trace — replace everything from step 0 with the full new trace
-        relevantStepDefs = resolved.steps;
-        insertAt = 0;
+    // Helper: recompute outputs from a start index, stopping if a step terminates
+    const recompute = (steps: TraceStep[], fromIdx: number, input: unknown): TraceStep[] => {
+      const result = steps.slice(0, fromIdx);
+      let current = input;
+      for (let i = fromIdx; i < steps.length; i++) {
+        const node = nodeMap.get(steps[i].nodeId);
+        const res = node ? resolveNodeOutput(node, current) : { output: current, terminates: false };
+        result.push({
+          ...steps[i],
+          inputPayload: current,
+          outputPayload: res.output,
+          terminated: res.terminates,
+          terminatedReason: res.terminates ? (res.explanation ?? 'Execution terminated at this step') : undefined,
+        });
+        if (res.terminates) break; // chain stops here
+        current = res.output;
       }
-    } else {
-      // No matching trace — update payloads in place for existing steps
-      setTraceSteps((prev) => {
-        const updated = [...prev];
-        let current = newInput;
-        for (let i = stepIndex; i < updated.length; i++) {
-          const node = nodeMap.get(updated[i].nodeId);
-          const out = node ? resolveNodeOutput(node, current) : current;
-          updated[i] = { ...updated[i], inputPayload: current, outputPayload: out };
-          current = out;
-        }
-        return updated;
+      return result;
+    };
+
+    // ── Step 0: the user edited the request body itself ──
+    if (stepIndex === 0) {
+      const resolved = resolveTrace(graph, traceRouteId, newInput);
+
+      if (!resolved) {
+        setTraceSteps((prev) => recompute(prev, 0, newInput));
+        return;
+      }
+
+      // Build new step list from the resolved trace
+      const templateSteps: TraceStep[] = resolved.steps.map((s) => {
+        const node = nodeMap.get(s.node_id);
+        return {
+          nodeId: s.node_id,
+          name: node?.name || s.node_id,
+          kind: node?.kind || 'function',
+          description: s.summary,
+          edgeLabel: s.edge_label,
+          inputType: node?.input ?? null,
+          outputType: node?.output ?? null,
+        };
       });
+
+      const newSteps = recompute(templateSteps, 0, newInput);
+      setTraceSteps(newSteps);
+      setTraceVisible(newSteps.length);
+      setActiveTraceIds(new Set(newSteps.map((s) => s.nodeId)));
       return;
     }
 
-    let current = newInput;
-    const updatedTail: TraceStep[] = relevantStepDefs.map((s) => {
-      const node = nodeMap.get(s.node_id);
-      const inputPayload = current;
-      const outputPayload = node ? resolveNodeOutput(node, inputPayload) : inputPayload;
-      current = outputPayload;
-      return {
-        nodeId: s.node_id,
-        name: node?.name || s.node_id,
-        kind: node?.kind || 'function',
-        description: s.summary,
-        edgeLabel: s.edge_label,
-        inputType: node?.input ?? null,
-        outputType: node?.output ?? null,
-        inputPayload,
-        outputPayload,
-      };
-    });
-
-    setTraceSteps((prev) => [...prev.slice(0, insertAt), ...updatedTail]);
-    setTraceVisible(insertAt + updatedTail.length);
-    setActiveTraceIds((prev) => {
-      const next = new Set(prev);
-      for (const step of updatedTail) next.add(step.nodeId);
-      return next;
-    });
+    // ── Step N > 0: intermediate payload edit ──
+    // Keep current trace path, recompute from stepIndex. Stops if a node terminates.
+    setTraceSteps((prev) => recompute(prev, stepIndex, newInput));
   }, [graph, traceRouteId, nodeMap]);
 
   /* landing screen */

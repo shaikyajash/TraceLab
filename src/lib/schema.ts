@@ -58,6 +58,9 @@ export interface NodeOutputCase {
   output: Record<string, unknown> | unknown[] | string | number | boolean | null;
   /** Optional human-readable explanation for this output case */
   explanation?: string;
+  /** If true, execution stops at this node (auth rejection, validation failure, error response).
+   *  Downstream steps are skipped — this node's output is the final response. */
+  terminates?: boolean;
 }
 
 export interface ComponentNode {

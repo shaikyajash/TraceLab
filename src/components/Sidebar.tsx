@@ -412,7 +412,9 @@ export default function Sidebar(props: SidebarProps) {
                         <span className="text-[#555] tracking-normal">{traceVisible} / {traceSteps.length} steps</span>
                       </div>
                       {!isTracing && traceVisible > 0 && traceVisible === traceSteps.length && (
-                        <span className="bg-[#0e2e0e] text-[#7ac97a] px-2 py-0.5 rounded text-[10px] font-bold">DONE</span>
+                        traceSteps[traceSteps.length - 1]?.terminated
+                          ? <span className="bg-[#2e1a0a] text-[#ef9f27] px-2 py-0.5 rounded text-[10px] font-bold">TERMINATED</span>
+                          : <span className="bg-[#0e2e0e] text-[#7ac97a] px-2 py-0.5 rounded text-[10px] font-bold">DONE</span>
                       )}
                     </div>
                     {traceSteps.slice(0, traceVisible).map((step, i) => {
@@ -469,6 +471,14 @@ export default function Sidebar(props: SidebarProps) {
                             </div>
                             {step.description && (
                               <div className="text-[9px] text-[#666] leading-relaxed">{step.description}</div>
+                            )}
+                            {step.terminated && (
+                              <div className="mt-1.5 flex items-center gap-1.5 bg-[#2e1a0a] border border-[#633806] rounded px-2 py-1">
+                                <span className="text-[9px] font-bold text-[#ef9f27]">CHAIN STOPPED</span>
+                                {step.terminatedReason && (
+                                  <span className="text-[8px] text-[#b87a1a]">— {step.terminatedReason}</span>
+                                )}
+                              </div>
                             )}
                             {isExpanded && (
                               <div className="mt-2.5 space-y-2">

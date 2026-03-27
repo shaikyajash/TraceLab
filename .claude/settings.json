@@ -30,7 +30,10 @@
       "Bash(xxd)",
       "Bash(python3 /tmp/verify_traces.py)",
       "Bash(python3:*)",
-      "Bash(ls /Users/lohit/Desktop/office/TraceLab/.env*)"
+      "Bash(ls /Users/lohit/Desktop/office/TraceLab/.env*)",
+      "Bash(find /private/tmp/tracelab-hashiraio-solver-engine -name *.rs)",
+      "Bash(find /Users/lohit/Desktop/office/TraceLab/scans -name *.json -type f)",
+      "Bash(curl -s -N 'http://localhost:3000/api/clone-and-scan' -X POST -H 'Content-Type: application/json' --data-raw '{\"\"url\"\":\"\"https://version.btcfi.wtf/hashiraio/solver-engine\"\",\"\"forceRescan\"\":true}')"
     ],
     "additionalDirectories": [
       "/private/tmp/solver-engine",
