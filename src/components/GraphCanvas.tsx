@@ -196,6 +196,13 @@ export default function GraphCanvas(props: GraphCanvasProps) {
         position: 'relative',
         overflow: 'hidden',
         cursor: isPanning ? 'grabbing' : 'grab',
+        background: '#0a0a0c',
+        backgroundImage: `
+          linear-gradient(rgba(42, 74, 122, 0.15) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(42, 74, 122, 0.15) 1px, transparent 1px)
+        `,
+        backgroundSize: '20px 20px',
+        backgroundPosition: `${tx}px ${ty}px`,
       }}
       onMouseDown={handleCanvasMouseDown}
       onMouseMove={handleCanvasMouseMove}
@@ -278,13 +285,12 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 key={i}
                 d={edgePath(x1, y1, x2, y2)}
                 fill="none"
-                stroke={isLit ? '#378ADD' : '#1a3a5c'}
+                stroke={isLit ? '#378ADD' : '#2a4a7a'}
                 strokeWidth={isLit ? 2 : 1.5}
                 strokeDasharray="5 4"
                 markerEnd={isLit ? 'url(#arr-lit)' : 'url(#arr)'}
                 style={{
-                  animation: 'dash 1.2s linear infinite',
-                  animationDelay: `${i * 0.15}s`,
+                  animation: isLit ? 'dash 1.5s linear infinite' : 'none',
                   transition: 'stroke 0.3s, stroke-width 0.3s',
                 }}
               />
@@ -400,7 +406,7 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 top: pos.y,
                 width: NODE_W,
                 minHeight: NODE_H,
-                background: '#111114',
+                background: 'linear-gradient(135deg, #1a1a1f 0%, #111114 100%)',
                 border: isPausedHere
                   ? '3px solid #f59e0b'
                   : isBreakpoint
@@ -412,26 +418,23 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                         : isTraceActive
                           ? `2px solid ${colors.border}66`
                           : '1px solid #2a2a2e',
-                borderRadius: 10,
+                borderRadius: 12,
                 opacity: isGreyedOut ? 0.25 : 1,
                 cursor: isDragging ? 'grabbing' : isGreyedOut ? 'not-allowed' : 'grab',
                 overflow: 'visible',
-                boxShadow: isPausedHere
-                  ? '0 0 20px rgba(245, 158, 11, 0.6)'
-                  : isDragging
-                    ? '0 8px 24px rgba(0,0,0,0.4)'
-                    : 'none',
+                boxShadow: isDragging
+                    ? '0 8px 20px rgba(0,0,0,0.4)'
+                    : '0 2px 6px rgba(0, 0, 0, 0.2)',
                 zIndex: isDragging ? 100 : undefined,
                 userSelect: 'none',
+                backdropFilter: 'blur(8px)',
               }}
             >
               {/* Breakpoint indicator - top right corner */}
               {isBreakpoint && (
                 <div
                   className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-[#f59e0b] flex items-center justify-center z-10 border-2 border-[#0d0d0f]"
-                  style={{
-                    boxShadow: '0 2px 8px rgba(245, 158, 11, 0.5)',
-                  }}
+                 
                   title="Breakpoint"
                 >
                   <div className="w-2 h-2 rounded-full bg-white" />
@@ -444,10 +447,7 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                   {stepNumbers.map((num, idx) => (
                     <div
                       key={idx}
-                      className="w-6 h-6 rounded-full bg-[#378ADD] flex items-center justify-center text-[10px] font-bold text-white border-2 border-[#0d0d0f]"
-                      style={{
-                        boxShadow: '0 2px 8px rgba(55, 138, 221, 0.4)',
-                      }}
+                      className="w-6 h-6 rounded-full bg-[#378ADD] flex items-center justify-center text-[10px] font-bold text-white"
                     >
                       {num}
                     </div>
@@ -457,24 +457,31 @@ export default function GraphCanvas(props: GraphCanvasProps) {
 
               {/* Top colored strip */}
               <div
-                className="h-1 w-full"
+                className="h-1.5 w-full rounded-t-2xl mt-[-1.1px]"
                 style={{
-                  background: isPausedHere ? '#f59e0b' : isBreakpoint ? '#f59e0b' : colors.border,
+                  background: isPausedHere 
+                    ? '#f59e0b' 
+                    : isBreakpoint 
+                      ? '#f59e0b' 
+                      : colors.border,
                 }}
               />
 
               {/* Content */}
-              <div className="p-3 overflow-hidden">
+              <div className="p-3.5 overflow-hidden">
                 {/* Badges row */}
                 <div className="flex items-center gap-1.5 mb-2.5">
                   <div
-                    className="text-[8px] px-2 py-1 rounded-md font-bold tracking-wider"
-                    style={{ background: colors.badgeBg, color: colors.badgeText }}
+                    className="text-[8px] px-2.5 py-1 rounded-md font-bold tracking-wider"
+                    style={{ 
+                      background: colors.badgeBg, 
+                      color: colors.badgeText,
+                    }}
                   >
                     {label}
                   </div>
                   {node.mutates_state && (
-                    <div className="text-[7px] bg-[#2d1a0a] text-[#EF9F27] px-1.5 py-0.5 rounded-md font-bold border border-[#633806]">
+                    <div className="text-[7px] bg-[#2d1a0a] text-[#EF9F27] px-2 py-1 rounded-md font-bold border border-[#633806]">
                       MUT
                     </div>
                   )}
@@ -494,13 +501,24 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                 </div>
 
                 {/* Node name */}
-                <div className="text-[12px] text-[#eee] font-semibold mb-2 leading-tight">
+                <div 
+                  className="text-[13px] text-[#f5f5f5] font-semibold mb-2 leading-tight tracking-tight overflow-hidden text-ellipsis whitespace-nowrap group relative"
+                  title={node.name}
+                >
                   {node.name}
+                  {/* Tooltip on hover */}
+                  <div className="absolute left-0 top-full mt-1 hidden group-hover:block z-50 pointer-events-none">
+                    <div className="bg-[#111114] border border-[#378ADD] rounded-md px-3 py-2 shadow-lg whitespace-nowrap">
+                      <div className="text-[11px] text-[#f5f5f5] font-medium">
+                        {node.name}
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Description */}
                 {node.description && (
-                  <div className="text-[9px] text-[#777] leading-relaxed">
+                  <div className="text-[9px] text-[#888] leading-relaxed">
                     {node.description.length > 85
                       ? node.description.slice(0, 85) + '...'
                       : node.description}

@@ -687,17 +687,17 @@ export default function Home() {
     setIsPausedAtBreakpoint(false);
     setCurrentBreakpointId(null);
 
-    let payload: Record<string, unknown> = {};
+    let payload: unknown = {};
     try {
-      payload = JSON.parse(reqBody) as Record<string, unknown>;
+      payload = JSON.parse(reqBody);
     } catch {
       /* empty */
     }
 
     // Merge path params into payload so output_cases can match on them
     const filledParams = Object.entries(pathParams).filter(([, v]) => v !== '');
-    if (filledParams.length > 0) {
-      payload = { ...Object.fromEntries(filledParams), ...payload };
+    if (filledParams.length > 0 && typeof payload === 'object' && payload !== null && !Array.isArray(payload)) {
+      payload = { ...Object.fromEntries(filledParams), ...(payload as Record<string, unknown>) };
     }
 
     const resolved = resolveTrace(graph, traceRouteId, payload);
@@ -997,10 +997,15 @@ export default function Home() {
       }
 
       // ── Step N > 0: intermediate payload edit ──
-      // Use the full resolvedStepDefs to rebuild the chain and recompute outputs.
-      // We DO NOT advance traceVisible or clear isPausedAtBreakpoint here.
-      // This allows the user to see the newly computed output for the current step
-      // while remaining paused, until they explicitly click "Resume".
+      // Re-resolve the trace with the new input to re-evaluate when conditions
+      // This ensures steps are included/excluded based on the edited input
+      const resolved = resolveTrace(graph, traceRouteId, newInput);
+      
+      if (resolved) {
+        resolvedStepDefsRef.current = resolved.steps;
+      }
+
+      // Rebuild the trace steps from the edited step onwards
       const newSteps = recompute(traceStepsRef.current, stepIndex, newInput);
       setTraceSteps(newSteps);
       traceStepsRef.current = newSteps;
@@ -1108,6 +1113,7 @@ export default function Home() {
               toggleSidebar={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               isPausedAtBreakpoint={isPausedAtBreakpoint}
               rerunFromStep={rerunFromStep}
+              resumeSimulation={resumeSimulation}
             />
           )}
         </div>

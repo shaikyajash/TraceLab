@@ -124,6 +124,12 @@
     scrollbar-width: thin;
     scrollbar-color: #444 transparent;
   }
+
+  @keyframes dash {
+    to {
+      stroke-dashoffset: -9;
+    }
+  }
 }
 
 @theme inline {
