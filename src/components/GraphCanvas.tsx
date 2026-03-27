@@ -597,14 +597,15 @@ export default function GraphCanvas(props: GraphCanvasProps) {
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (isPausedAtBreakpoint) {
+                  if (isPausedAtBreakpoint && !traceSteps[traceVisible - 1]?.terminated) {
                     resumeSimulation();
                   }
                 }}
-                disabled={!isPausedAtBreakpoint}
+                disabled={!isPausedAtBreakpoint || traceSteps[traceVisible - 1]?.terminated}
                 className="bg-[#378ADD] hover:bg-[#4a9bef] text-white px-4 py-2 rounded-md text-[10px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                title={traceSteps[traceVisible - 1]?.terminated ? "Fix errors in the current step before resuming" : "Resume simulation from breakpoint"}
               >
-                Resume
+                {traceSteps[traceVisible - 1]?.terminated ? 'Fix issues before resuming' : 'Resume'}
               </button>
               <button
                 onClick={(e) => {

@@ -179,6 +179,18 @@ export default function Home() {
   const [isPausedAtBreakpoint, setIsPausedAtBreakpoint] = useState(false);
   const [currentBreakpointId, setCurrentBreakpointId] = useState<string | null>(null);
 
+  // Refs for always-current values inside async callbacks (avoids stale closures)
+  const traceStepsRef = useRef<TraceStep[]>([]);
+  const traceVisibleRef = useRef(0);
+  const breakpointsRef = useRef<Set<string>>(new Set());
+  // Full trace path definition from resolveTrace — NOT truncated by termination
+  const resolvedStepDefsRef = useRef<TraceStepDef[]>([]);
+
+  // Keep refs in sync with state
+  useEffect(() => { traceStepsRef.current = traceSteps; }, [traceSteps]);
+  useEffect(() => { traceVisibleRef.current = traceVisible; }, [traceVisible]);
+  useEffect(() => { breakpointsRef.current = breakpoints; }, [breakpoints]);
+
   /* request builder */
   const [pathParams, setPathParams] = useState<Record<string, string>>({});
   const [reqBody, setReqBody] = useState('{\n  \n}');
@@ -652,6 +664,7 @@ export default function Home() {
     }
 
     const { steps: resolvedStepDefs } = resolved;
+    resolvedStepDefsRef.current = resolvedStepDefs;
 
     let currentPayload: unknown = payload;
     const steps: TraceStep[] = [];
@@ -681,12 +694,14 @@ export default function Home() {
     }
 
     setTraceSteps(steps);
+    traceStepsRef.current = steps;
 
     for (let i = 0; i < steps.length; i++) {
       await new Promise((r) => setTimeout(r, TRACE_STEP_DELAY));
       setTraceHeadId(steps[i].nodeId);
       setActiveTraceIds((prev) => new Set([...prev, steps[i].nodeId]));
       setTraceVisible(i + 1);
+      traceVisibleRef.current = i + 1;
 
       // Check if current node is a breakpoint
       if (breakpoints.has(steps[i].nodeId)) {
@@ -703,22 +718,64 @@ export default function Home() {
   }, [traceRouteId, graph, nodeMap, reqBody, pathParams, breakpoints]);
 
   const resumeSimulation = useCallback(async () => {
-    if (!traceSteps.length || traceVisible >= traceSteps.length) return;
+    // Read latest state from refs
+    const steps = traceStepsRef.current;
+    const startAt = traceVisibleRef.current;
+
+    // If all shown steps have been revealed, check if we can extend the chain.
+    // This happens when the last computed step terminated (truncated the array)
+    // but we still have more step definitions in the full trace.
+    if (startAt >= steps.length && resolvedStepDefsRef.current.length > steps.length) {
+      // Rebuild full template from resolvedStepDefs, recompute from the last step's output
+      const lastStep = steps[steps.length - 1];
+      if (lastStep && !lastStep.terminated) {
+        // Last step is no longer terminated (was edited), extend the chain
+        const fullTemplate = buildFullTemplate(resolvedStepDefsRef.current, nodeMap);
+        const extended = recomputeFromStep(fullTemplate, steps.length, lastStep.outputPayload, nodeMap);
+        const allSteps = [...steps.slice(0, steps.length).map(s => ({ ...s, terminated: false, terminatedReason: undefined })), ...extended];
+        setTraceSteps(allSteps);
+        traceStepsRef.current = allSteps;
+        // Animate from where we left off
+        setIsTracing(true);
+        setIsPausedAtBreakpoint(false);
+        setCurrentBreakpointId(null);
+        for (let i = startAt; i < allSteps.length; i++) {
+          await new Promise((r) => setTimeout(r, TRACE_STEP_DELAY));
+          setTraceHeadId(allSteps[i].nodeId);
+          setActiveTraceIds((prev) => new Set([...prev, allSteps[i].nodeId]));
+          setTraceVisible(i + 1);
+          traceVisibleRef.current = i + 1;
+          if (breakpointsRef.current.has(allSteps[i].nodeId)) {
+            setIsPausedAtBreakpoint(true);
+            setCurrentBreakpointId(allSteps[i].nodeId);
+            setSelectedId(allSteps[i].nodeId);
+            setIsTracing(false);
+            return;
+          }
+        }
+        setIsTracing(false);
+        setTimeout(() => setTraceHeadId(null), TRACE_HEAD_CLEAR_DELAY);
+        return;
+      }
+    }
+
+    if (!steps.length || startAt >= steps.length) return;
 
     setIsTracing(true);
     setIsPausedAtBreakpoint(false);
     setCurrentBreakpointId(null);
 
-    for (let i = traceVisible; i < traceSteps.length; i++) {
+    for (let i = startAt; i < steps.length; i++) {
       await new Promise((r) => setTimeout(r, TRACE_STEP_DELAY));
-      setTraceHeadId(traceSteps[i].nodeId);
-      setActiveTraceIds((prev) => new Set([...prev, traceSteps[i].nodeId]));
+      setTraceHeadId(steps[i].nodeId);
+      setActiveTraceIds((prev) => new Set([...prev, steps[i].nodeId]));
       setTraceVisible(i + 1);
+      traceVisibleRef.current = i + 1;
 
-      if (breakpoints.has(traceSteps[i].nodeId)) {
+      if (breakpointsRef.current.has(steps[i].nodeId)) {
         setIsPausedAtBreakpoint(true);
-        setCurrentBreakpointId(traceSteps[i].nodeId);
-        setSelectedId(traceSteps[i].nodeId);
+        setCurrentBreakpointId(steps[i].nodeId);
+        setSelectedId(steps[i].nodeId);
         setIsTracing(false);
         return;
       }
@@ -726,7 +783,7 @@ export default function Home() {
 
     setIsTracing(false);
     setTimeout(() => setTraceHeadId(null), TRACE_HEAD_CLEAR_DELAY);
-  }, [traceSteps, traceVisible, breakpoints]);
+  }, [nodeMap]);
 
   const skipBreakpoint = useCallback(() => {
     setIsPausedAtBreakpoint(false);
@@ -753,82 +810,122 @@ export default function Home() {
     setTraceVisible(0);
     setIsPausedAtBreakpoint(false);
     setCurrentBreakpointId(null);
+    resolvedStepDefsRef.current = [];
   }, []);
+
+  /** Build a full template of TraceStep objects from resolvedStepDefs (no I/O computed) */
+  function buildFullTemplate(stepDefs: TraceStepDef[], nodeMap: Map<string, ComponentNode>): TraceStep[] {
+    return stepDefs.map((s) => {
+      const node = nodeMap.get(s.node_id);
+      return {
+        nodeId: s.node_id,
+        name: node?.name || s.node_id,
+        kind: node?.kind || 'function',
+        description: s.summary,
+        edgeLabel: s.edge_label,
+        inputType: node?.input ?? null,
+        outputType: node?.output ?? null,
+      };
+    });
+  }
+
+  /** Recompute outputs from a given index in a steps template */
+  function recomputeFromStep(
+    templateSteps: TraceStep[],
+    fromIdx: number,
+    input: unknown,
+    nodeMap: Map<string, ComponentNode>,
+  ): TraceStep[] {
+    const result: TraceStep[] = [];
+    let current = input;
+    for (let i = fromIdx; i < templateSteps.length; i++) {
+      const node = nodeMap.get(templateSteps[i].nodeId);
+      const res = node
+        ? resolveNodeOutput(node, current)
+        : { output: current, terminates: false };
+      result.push({
+        ...templateSteps[i],
+        inputPayload: current,
+        outputPayload: res.output,
+        terminated: res.terminates,
+        terminatedReason: res.terminates
+          ? (res.explanation ?? 'Execution terminated at this step')
+          : undefined,
+      });
+      if (res.terminates) break;
+      current = res.output;
+    }
+    return result;
+  }
 
   /**
    * Re-run payload propagation from a given step with a new input.
-   * Step 0 = request body → re-resolve trace (input may select a different path).
-   * Step N>0 = intermediate payload → keep current trace, recompute outputs in-place
-   *   using each node's output_cases so the chain reacts deterministically.
+   * Uses the full resolvedStepDefs (never truncated) so the chain can
+   * extend past previously-terminated steps when input is corrected.
    */
   const rerunFromStep = useCallback(
     (stepIndex: number, nodeId: string, newInput: unknown) => {
       if (!graph || !traceRouteId) return;
 
-      // Helper: recompute outputs from a start index, stopping if a step terminates
-      const recompute = (steps: TraceStep[], fromIdx: number, input: unknown): TraceStep[] => {
-        const result = steps.slice(0, fromIdx);
-        let current = input;
-        for (let i = fromIdx; i < steps.length; i++) {
-          const node = nodeMap.get(steps[i].nodeId);
-          const res = node
-            ? resolveNodeOutput(node, current)
-            : { output: current, terminates: false };
-          result.push({
-            ...steps[i],
-            inputPayload: current,
-            outputPayload: res.output,
-            terminated: res.terminates,
-            terminatedReason: res.terminates
-              ? (res.explanation ?? 'Execution terminated at this step')
-              : undefined,
-          });
-          if (res.terminates) break; // chain stops here
-          current = res.output;
-        }
-        return result;
+      // Helper: recompute outputs from a start index using FULL template
+      const recompute = (fromIdx: number, input: unknown): TraceStep[] => {
+        // Build full template from resolvedStepDefs (never truncated)
+        const fullTemplate = buildFullTemplate(resolvedStepDefsRef.current, nodeMap);
+        // Keep steps before fromIdx from current trace
+        const kept = traceStepsRef.current.slice(0, fromIdx);
+        const extended = recomputeFromStep(fullTemplate, fromIdx, input, nodeMap);
+        return [...kept, ...extended];
       };
 
       // ── Step 0: the user edited the request body itself ──
       if (stepIndex === 0) {
         const resolved = resolveTrace(graph, traceRouteId, newInput);
 
-        if (!resolved) {
-          setTraceSteps((prev) => recompute(prev, 0, newInput));
-          return;
+        if (resolved) {
+          resolvedStepDefsRef.current = resolved.steps;
         }
 
-        // Build new step list from the resolved trace
-        const templateSteps: TraceStep[] = resolved.steps.map((s) => {
-          const node = nodeMap.get(s.node_id);
-          return {
-            nodeId: s.node_id,
-            name: node?.name || s.node_id,
-            kind: node?.kind || 'function',
-            description: s.summary,
-            edgeLabel: s.edge_label,
-            inputType: node?.input ?? null,
-            outputType: node?.output ?? null,
-          };
-        });
-
-        const newSteps = recompute(templateSteps, 0, newInput);
+        const newSteps = recompute(0, newInput);
         setTraceSteps(newSteps);
-        setTraceVisible(newSteps.length);
-        setActiveTraceIds(new Set(newSteps.map((s) => s.nodeId)));
+        traceStepsRef.current = newSteps;
+        setTraceVisible(0);
+        traceVisibleRef.current = 0;
+        setActiveTraceIds(new Set());
+        setIsPausedAtBreakpoint(false);
+        setCurrentBreakpointId(null);
+        setIsTracing(true);
+
+        // Animate through all steps
+        (async () => {
+          for (let i = 0; i < newSteps.length; i++) {
+            await new Promise((r) => setTimeout(r, TRACE_STEP_DELAY));
+            setTraceHeadId(newSteps[i].nodeId);
+            setActiveTraceIds((prev) => new Set([...prev, newSteps[i].nodeId]));
+            setTraceVisible(i + 1);
+            traceVisibleRef.current = i + 1;
+
+            if (breakpointsRef.current.has(newSteps[i].nodeId)) {
+              setIsPausedAtBreakpoint(true);
+              setCurrentBreakpointId(newSteps[i].nodeId);
+              setSelectedId(newSteps[i].nodeId);
+              setIsTracing(false);
+              return;
+            }
+          }
+          setIsTracing(false);
+          setTimeout(() => setTraceHeadId(null), TRACE_HEAD_CLEAR_DELAY);
+        })();
         return;
       }
 
       // ── Step N > 0: intermediate payload edit ──
-      // Keep current trace path, recompute from stepIndex. Stops if a node terminates.
-      setTraceSteps((prev) => recompute(prev, stepIndex, newInput));
-      // Update visible count after state settles
-      setTimeout(() => {
-        setTraceSteps((current) => {
-          setTraceVisible(current.length);
-          return current;
-        });
-      }, 0);
+      // Use the full resolvedStepDefs to rebuild the chain and recompute outputs.
+      // We DO NOT advance traceVisible or clear isPausedAtBreakpoint here.
+      // This allows the user to see the newly computed output for the current step
+      // while remaining paused, until they explicitly click "Resume".
+      const newSteps = recompute(stepIndex, newInput);
+      setTraceSteps(newSteps);
+      traceStepsRef.current = newSteps;
     },
     [graph, traceRouteId, nodeMap],
   );

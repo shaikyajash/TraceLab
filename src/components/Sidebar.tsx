@@ -171,26 +171,24 @@ export default function Sidebar(props: SidebarProps) {
     }
   };
 
-  // Clear expandedStep when selecting a node that doesn't match the current expanded step
+  // Auto-set expandedStep when selecting a node that exists in trace
   useEffect(() => {
-    if (selectedNode && expandedStep !== null) {
-      // Check if the selected node matches the expanded step
-      const expandedStepNode = traceSteps[expandedStep]?.nodeId;
-      if (expandedStepNode !== selectedNode.id) {
+    if (selectedNode && traceSteps.length > 0) {
+      // Find the latest step for this node in the trace
+      const stepIndex = traceSteps.findLastIndex((step) => step.nodeId === selectedNode.id);
+      if (stepIndex !== -1 && stepIndex !== expandedStep) {
+        setExpandedStep(stepIndex);
+      } else if (stepIndex === -1 && expandedStep !== null) {
+        // Node not in trace, clear expandedStep
         setExpandedStep(null);
       }
     }
-  }, [selectedNode, expandedStep, traceSteps]);
+  }, [selectedNode, traceSteps]);
 
   // Expand Inspector and scroll when a node is selected
   useEffect(() => {
     if (selectedNode && !isTracing) {
-      // Only open inspector if user manually clicked (check if expandedStep was set by user click)
-      const wasManualClick = expandedStep !== null;
-
-      if (wasManualClick) {
-        setInspectorOpen(true);
-      }
+      setInspectorOpen(true);
 
       // Scroll to inspector or error
       setTimeout(() => {
@@ -574,33 +572,33 @@ export default function Sidebar(props: SidebarProps) {
                             className="w-full min-h-[100px] bg-[#0d0d0f] border-[0.5px] border-[#2a2a2e] rounded px-2.5 py-2 text-[10px] text-[#ccc] font-mono outline-none resize-y leading-relaxed box-border mt-1"
                           />
                         </Field>
-                        {stepInputEdits[expandedStep] != null && (
-                          <Button
-                            onClick={() => {
-                              try {
-                                const parsed = JSON.parse(stepInputEdits[expandedStep]);
-                                rerunFromStep(
-                                  expandedStep,
-                                  traceSteps[expandedStep].nodeId,
-                                  parsed,
-                                );
-                                // Clear edits for this step and all later steps
-                                setStepInputEdits((prev) => {
-                                  const n = { ...prev };
-                                  for (const k of Object.keys(n)) {
-                                    if (Number(k) >= expandedStep) delete n[Number(k)];
-                                  }
-                                  return n;
-                                });
-                              } catch {
-                                /* invalid JSON */
-                              }
-                            }}
-                            className="w-full bg-[#378ADD] hover:bg-[#4a9bef] text-white text-[10px] font-semibold mt-2"
-                          >
-                            Run from step {expandedStep + 1}
-                          </Button>
-                        )}
+                        <Button
+                          onClick={() => {
+                            try {
+                              const inputToUse = stepInputEdits[expandedStep] ??
+                                JSON.stringify(traceSteps[expandedStep].inputPayload);
+                              const parsed = JSON.parse(inputToUse);
+                              rerunFromStep(
+                                expandedStep,
+                                traceSteps[expandedStep].nodeId,
+                                parsed,
+                              );
+                              // Clear edits for this step and all later steps
+                              setStepInputEdits((prev) => {
+                                const n = { ...prev };
+                                for (const k of Object.keys(n)) {
+                                  if (Number(k) >= expandedStep) delete n[Number(k)];
+                                }
+                                return n;
+                              });
+                            } catch (err) {
+                              console.error('Failed to parse input JSON:', err);
+                            }
+                          }}
+                          className="w-full bg-[#378ADD] hover:bg-[#4a9bef] text-white text-[10px] font-semibold mt-2"
+                        >
+                          Save & Check
+                        </Button>
                       </div>
                     )}
 
@@ -681,13 +679,12 @@ export default function Sidebar(props: SidebarProps) {
                   <span>TRACE FLOW</span>
                   {traceSteps.length > 0 && (
                     <span
-                      className={`tracking-normal ${
-                        traceSteps.some((s) => s.terminated)
+                      className={`tracking-normal ${traceSteps.some((s) => s.terminated)
                           ? 'text-[#f59e0b]'
                           : !isTracing && traceVisible > 0 && traceVisible === traceSteps.length
                             ? 'text-[#378ADD]'
                             : 'text-[#555]'
-                      }`}
+                        }`}
                     >
                       {traceVisible} / {traceSteps.length}
                     </span>
@@ -727,9 +724,8 @@ export default function Sidebar(props: SidebarProps) {
                           <div className="relative pt-2">
                             {/* Step number bubble - centered on top edge, more inside */}
                             <div
-                              className={`absolute left-1/2 -translate-x-1/2 -top-2 w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] text-white ${
-                                step.terminated ? 'bg-[#f59e0b]' : 'bg-[#378ADD]'
-                              }`}
+                              className={`absolute left-1/2 -translate-x-1/2 -top-2 w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] text-white ${step.terminated ? 'bg-[#f59e0b]' : 'bg-[#378ADD]'
+                                }`}
                             >
                               {i + 1}
                             </div>
