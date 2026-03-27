@@ -391,13 +391,8 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                   }
                 }
 
-                // Only allow breakpoints on nodes that are part of the trace
-                if (
-                  activeTraceIds.has(node.id) ||
-                  traceSteps.some((step) => step.nodeId === node.id)
-                ) {
-                  toggleBreakpoint(node.id);
-                }
+                // Allow breakpoints on any node at any time
+                toggleBreakpoint(node.id);
               }}
               className={`absolute ${isDragging ? '' : 'transition-all duration-200'}`}
               style={{
@@ -583,14 +578,12 @@ export default function GraphCanvas(props: GraphCanvasProps) {
               />
             </svg>
             <span className="text-[10px] text-[#888] font-medium whitespace-nowrap">
-              {traceSteps.length > 0
-                ? 'Right-click on traced nodes to add breakpoints'
-                : 'Run a simulation first to enable breakpoints'}
+              Right-click on any node to add breakpoints
             </span>
           </div>
 
-          {/* Third row: Breakpoint controls (only show when there are trace steps) */}
-          {traceSteps.length > 0 && (
+          {/* Third row: Breakpoint controls */}
+          {(breakpoints.size > 0 || isPausedAtBreakpoint) && (
             <div className="flex gap-2">
               {/* Breakpoint counter */}
               {breakpoints.size > 0 && (

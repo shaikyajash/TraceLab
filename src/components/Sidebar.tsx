@@ -134,11 +134,14 @@ export default function Sidebar(props: SidebarProps) {
 
   const traceFlowRef = useRef<HTMLDivElement>(null);
   const inspectorRef = useRef<HTMLDivElement>(null);
+  const errorRef = useRef<HTMLDivElement>(null);
 
   const handleSimulate = () => {
     runSimulation();
     setTraceFlowOpen(true);
     setInspectorOpen(false);
+    setParamsOpen(false);
+    setBodyOpen(false);
     setExpandedStep(null);
     setStepInputEdits({});
   };
@@ -153,50 +156,55 @@ export default function Sidebar(props: SidebarProps) {
     setStepInputEdits({});
   };
 
-  // Expand Inspector and scroll when a node is selected, collapse if deselected
+  // Clear error state when input is edited
+  const handleInputEdit = (stepIndex: number, value: string) => {
+    setStepInputEdits((prev) => ({
+      ...prev,
+      [stepIndex]: value,
+    }));
+    // Clear terminated flag for this step when user edits input
+    if (traceSteps[stepIndex]) {
+      traceSteps[stepIndex].terminated = false;
+    }
+  };
+
+  // Clear expandedStep when selecting a node that doesn't match the current expanded step
   useEffect(() => {
-    if (selectedNode) {
-      // Open inspector when node is selected (paused at breakpoint OR manual selection)
-      if (isPausedAtBreakpoint || !isTracing) {
+    if (selectedNode && expandedStep !== null) {
+      // Check if the selected node matches the expanded step
+      const expandedStepNode = traceSteps[expandedStep]?.nodeId;
+      if (expandedStepNode !== selectedNode.id) {
+        setExpandedStep(null);
+      }
+    }
+  }, [selectedNode, expandedStep, traceSteps]);
+
+  // Expand Inspector only on manual click, not during/after simulation
+  useEffect(() => {
+    if (selectedNode && !isTracing) {
+      // Only open inspector if user manually clicked (check if expandedStep was set by user click)
+      const wasManualClick = expandedStep !== null;
+      
+      if (wasManualClick) {
         setInspectorOpen(true);
 
-        // Check if the selected node is exactly the one we paused on
-        const isAtBreakpointStep =
-          isPausedAtBreakpoint &&
-          traceVisible > 0 &&
-          traceSteps[traceVisible - 1]?.nodeId === selectedNode.id;
-
-        if (isAtBreakpointStep) {
-          setTraceFlowOpen(true);
-          const stepIndex = traceVisible - 1;
-          setExpandedStep(stepIndex);
-          setTimeout(() => {
-            const el = document.getElementById(`trace-step-${stepIndex}`);
-            if (el) {
-              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
-          }, 310);
-        } else {
-          setTimeout(() => {
+        // If there's an error in the expanded step, scroll to it
+        setTimeout(() => {
+          if (expandedStep !== null && traceSteps[expandedStep]?.terminated && errorRef.current) {
+            errorRef.current.scrollIntoView({
+              behavior: 'smooth',
+              block: 'center',
+            });
+          } else {
             inspectorRef.current?.scrollIntoView({
               behavior: 'smooth',
               block: 'start',
             });
-          }, 310);
-        }
+          }
+        }, 310);
       }
-
-      // During active simulation (not paused), keep trace flow visible
-      if (isTracing && !isPausedAtBreakpoint) {
-        setInspectorOpen(false);
-        if (traceSteps.length > 0) {
-          setTraceFlowOpen(true);
-        }
-      }
-    } else {
-      setInspectorOpen(false);
     }
-  }, [selectedNode, isPausedAtBreakpoint, isTracing, traceSteps, traceVisible]);
+  }, [selectedNode, isTracing, expandedStep]);
 
   // Collapse params/body if they're empty when route changes
   useEffect(() => {
@@ -206,7 +214,7 @@ export default function Sidebar(props: SidebarProps) {
     }
   }, [traceRouteId, routePathParams.length, reqBody]);
 
-  // Auto-scroll to latest step in Trace Flow
+  // Auto-scroll to latest step in Trace Flow during and after simulation
   useEffect(() => {
     if (traceFlowOpen && traceFlowRef.current && traceVisible > 0) {
       const el = traceFlowRef.current;
@@ -218,7 +226,7 @@ export default function Sidebar(props: SidebarProps) {
             behavior: 'smooth',
           });
         }
-      }, 50);
+      }, 100);
     }
   }, [traceVisible, traceFlowOpen]);
 
@@ -410,8 +418,6 @@ export default function Sidebar(props: SidebarProps) {
                     </Field>
 
                     <Field label="DEFINED IN">{selectedNode.defined_in || '—'}</Field>
-                    <Field label="INPUT">{selectedNode.input || '—'}</Field>
-                    <Field label="OUTPUT">{selectedNode.output || '—'}</Field>
 
                     <Field label="MUTATES STATE">
                       <span
@@ -428,6 +434,82 @@ export default function Sidebar(props: SidebarProps) {
 
                     {selectedNode.description && (
                       <Field label="DESCRIPTION">{selectedNode.description}</Field>
+                    )}
+
+                    {/* Always show input editor for any selected node */}
+                    <div>
+                      <Field label="INPUT (CUSTOM)">
+                        <textarea
+                          value={
+                            (stepInputEdits as Record<string, string>)[selectedNode.id] ??
+                            (expandedStep !== null && traceSteps[expandedStep]?.inputPayload
+                              ? JSON.stringify(traceSteps[expandedStep].inputPayload, null, 2)
+                              : '{}')
+                          }
+                          onChange={(e) => {
+                            setStepInputEdits((prev) => ({
+                              ...prev,
+                              [selectedNode.id]: e.target.value,
+                            }));
+                          }}
+                          placeholder="Enter custom input JSON for this node..."
+                          spellCheck={false}
+                          className="w-full min-h-[100px] bg-[#0d0d0f] border-[0.5px] border-[#2a2a2e] rounded px-2.5 py-2 text-[10px] text-[#ccc] font-mono outline-none resize-y leading-relaxed box-border mt-1"
+                        />
+                      </Field>
+                      {(stepInputEdits as Record<string, string>)[selectedNode.id] && (
+                        <Button
+                          onClick={() => {
+                            try {
+                              const parsed = JSON.parse((stepInputEdits as Record<string, string>)[selectedNode.id]);
+                              // If we have a step index, use rerunFromStep
+                              if (expandedStep !== null) {
+                                rerunFromStep(expandedStep, selectedNode.id, parsed);
+                                setStepInputEdits((prev) => {
+                                  const n = { ...prev };
+                                  Object.keys(n).forEach((k) => {
+                                    if (Number(k) >= expandedStep) delete n[Number(k)];
+                                  });
+                                  return n;
+                                });
+                              }
+                              // Otherwise just save it for when simulation runs
+                            } catch {
+                              /* invalid JSON */
+                            }
+                          }}
+                          className="w-full bg-[#378ADD] hover:bg-[#4a9bef] text-white text-[10px] font-semibold mt-2"
+                        >
+                          {expandedStep !== null
+                            ? `Run from step ${expandedStep + 1}`
+                            : 'Save custom input'}
+                        </Button>
+                      )}
+                    </div>
+
+                    {/* Show step I/O if we have an expanded step with actual runtime data */}
+                    {expandedStep !== null && traceSteps[expandedStep] && (
+                      <>
+                        {traceSteps[expandedStep].outputPayload != null && (
+                          <Field label="OUTPUT">
+                            <pre className="whitespace-pre-wrap break-all font-mono text-[10px]">
+                              {JSON.stringify(traceSteps[expandedStep].outputPayload, null, 2)}
+                            </pre>
+                          </Field>
+                        )}
+                        {traceSteps[expandedStep].terminated && (
+                          <div ref={errorRef} className="flex items-center gap-2 bg-[#2e1a0a] border border-[#633806] rounded px-2.5 py-1.5">
+                            <span className="text-[10px] font-bold text-[#ef9f27]">
+                              CHAIN STOPPED
+                            </span>
+                            {traceSteps[expandedStep].terminatedReason && (
+                              <span className="text-[9px] text-[#b87a1a]">
+                                — {traceSteps[expandedStep].terminatedReason}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
 
                     {(() => {
@@ -474,176 +556,111 @@ export default function Sidebar(props: SidebarProps) {
 
             {/* TRACE FLOW SECTION */}
             <CollapsibleSection
-              title="TRACE FLOW"
+              title={
+                <div className="flex items-center gap-2">
+                  <span>TRACE FLOW</span>
+                  {traceSteps.length > 0 && (
+                    <span
+                      className={`tracking-normal ${
+                        traceSteps.some((s) => s.terminated)
+                          ? 'text-[#f59e0b]'
+                          : !isTracing && traceVisible > 0 && traceVisible === traceSteps.length
+                            ? 'text-[#378ADD]'
+                            : 'text-[#555]'
+                      }`}
+                    >
+                      {traceVisible} / {traceSteps.length}
+                    </span>
+                  )}
+                </div>
+              }
               isOpen={traceFlowOpen}
               onToggle={() => setTraceFlowOpen(!traceFlowOpen)}
-              badge={
-                traceSteps.length > 0 && (
-                  <span className="text-[#378ADD] ml-1.5">{traceSteps.length}</span>
-                )
-              }
             >
               <div ref={traceFlowRef}>
                 {traceSteps.length > 0 ? (
                   <>
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="text-[10px] text-[#666] tracking-wider font-semibold">
-                        <span className="text-[#555] tracking-normal">
-                          {traceVisible} / {traceSteps.length} steps
-                        </span>
-                      </div>
-                      {!isTracing &&
-                        traceVisible > 0 &&
-                        traceVisible === traceSteps.length &&
-                        (traceSteps[traceSteps.length - 1]?.terminated ? (
-                          <span className="bg-[#2e1a0a] text-[#ef9f27] px-2 py-0.5 rounded text-[10px] font-bold">
-                            TERMINATED
-                          </span>
-                        ) : (
-                          <span className="bg-[#0e2e0e] text-[#7ac97a] px-2 py-0.5 rounded text-[10px] font-bold">
-                            DONE
-                          </span>
-                        ))}
-                    </div>
                     {traceSteps.slice(0, traceVisible).map((step, i) => {
                       const colors = KIND_COLORS[step.kind] || KIND_COLORS.business_logic;
-                      const isExpanded = expandedStep === i;
-                      const rawInput =
-                        stepInputEdits[i] ??
-                        (step.inputPayload != null
-                          ? JSON.stringify(step.inputPayload, null, 2)
-                          : '');
-                      const hasPayloads = step.inputPayload != null || step.outputPayload != null;
                       return (
                         <div
                           key={i}
                           id={`trace-step-${i}`}
-                          className="mb-1"
+                          className="relative mb-3 mt-5"
                           style={{
                             animation: 'fadeInBlur 0.4s ease-out',
                             animationFillMode: 'both',
                           }}
                         >
-                          {i > 0 && step.edgeLabel && (
-                            <div className="flex items-center gap-2 py-1 pl-4">
-                              <div className="w-0 h-0 border-l-4 border-l-[#378ADD] border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent" />
-                              <span className="text-[9px] text-[#666] italic">
-                                {step.edgeLabel}
-                              </span>
-                            </div>
-                          )}
-                          {i > 0 && !step.edgeLabel && (
-                            <div className="flex items-center gap-2 py-1 pl-4">
-                              <div className="w-0 h-0 border-l-4 border-l-[#378ADD] border-t-[3px] border-t-transparent border-b-[3px] border-b-transparent" />
-                            </div>
-                          )}
-                          <div
-                            className="bg-[#111114] rounded-md p-3 transition-colors relative"
-                            style={{
-                              border: `0.5px solid ${isExpanded ? colors.border + '88' : colors.border + '33'}`,
-                            }}
-                          >
-                            <div className="flex items-center gap-2 mb-1">
-                              <div
-                                className="text-[8px] px-1.5 py-0.5 rounded font-bold"
-                                style={{ background: colors.badgeBg, color: colors.badgeText }}
-                              >
-                                {KIND_LABELS[step.kind] || step.kind.toUpperCase()}
-                              </div>
-                              <span className="text-[10px] text-[#bbb] font-medium">
-                                {step.name}
-                              </span>
-                              <div className="ml-auto flex items-center gap-1.5">
-                                {hasPayloads && (
-                                  <button
-                                    onClick={() => setExpandedStep(isExpanded ? null : i)}
-                                    className="text-[8px] px-1.5 py-0.5 rounded border-[0.5px] border-[#2a2a2e] text-[#555] hover:text-[#378ADD] hover:border-[#378ADD] transition-colors bg-transparent cursor-pointer"
-                                    title={isExpanded ? 'Hide I/O' : 'Inspect I/O'}
-                                  >
-                                    {isExpanded ? '▲ I/O' : '▼ I/O'}
-                                  </button>
-                                )}
-                                <div className="w-5 h-5 shrink-0 rounded-full bg-[#378ADD] flex items-center justify-center text-[9px] font-bold text-white shadow-sm ring-1 ring-black/20">
-                                  {i + 1}
-                                </div>
-                              </div>
-                            </div>
-                            {step.description && (
-                              <div className="text-[9px] text-[#666] leading-relaxed">
-                                {step.description}
-                              </div>
-                            )}
-                            {step.terminated && (
-                              <div className="mt-1.5 flex items-center gap-1.5 bg-[#2e1a0a] border border-[#633806] rounded px-2 py-1">
-                                <span className="text-[9px] font-bold text-[#ef9f27]">
-                                  CHAIN STOPPED
+                          {/* Connector line */}
+                          {i > 0 && (
+                            <div className="flex flex-col items-center py-1.5">
+                              <div className="w-[2px] h-4 bg-gradient-to-b from-[#378ADD] to-[#378ADD]/30" />
+                              {step.edgeLabel && (
+                                <span className="text-[9px] text-[#666] italic font-medium mt-1">
+                                  {step.edgeLabel}
                                 </span>
-                                {step.terminatedReason && (
-                                  <span className="text-[8px] text-[#b87a1a]">
-                                    — {step.terminatedReason}
-                                  </span>
-                                )}
+                              )}
+                            </div>
+                          )}
+                          {/* Step card with bubble on top */}
+                          <div className="relative pt-2">
+                            {/* Step number bubble - centered on top edge, more inside */}
+                            <div
+                              className={`absolute left-1/2 -translate-x-1/2 -top-2 w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] text-white ${
+                                step.terminated ? 'bg-[#f59e0b]' : 'bg-[#378ADD]'
+                              }`}
+                            >
+                              {i + 1}
+                            </div>
+                            {/* Step content card */}
+                            <div
+                              className="bg-[#111114] rounded-lg p-2.5 transition-all hover:bg-[#0d0d0f] hover:shadow-lg cursor-pointer"
+                              style={{
+                                border: step.terminated 
+                                  ? `1px solid #ef9f27` 
+                                  : `1px solid ${colors.border}40`,
+                              }}
+                              onClick={() => {
+                                const node = nodeById(step.nodeId);
+                                if (node) {
+                                  setSelectedId(step.nodeId);
+                                  setInspectorOpen(true);
+                                  setExpandedStep(i);
+                                  setTimeout(() => {
+                                    // If this step has an error, scroll to error, otherwise scroll to inspector
+                                    if (step.terminated && errorRef.current) {
+                                      errorRef.current.scrollIntoView({
+                                        behavior: 'smooth',
+                                        block: 'center',
+                                      });
+                                    } else {
+                                      inspectorRef.current?.scrollIntoView({
+                                        behavior: 'smooth',
+                                        block: 'start',
+                                      });
+                                    }
+                                  }, 100);
+                                }
+                              }}
+                            >
+                              <div className="flex items-center gap-1.5 mb-1.5">
+                                <div
+                                  className="text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide"
+                                  style={{ background: colors.badgeBg, color: colors.badgeText }}
+                                >
+                                  {KIND_LABELS[step.kind] || step.kind}
+                                </div>
+                                <span className="text-[10px] text-[#ddd] font-semibold flex-1 truncate">
+                                  {step.name}
+                                </span>
                               </div>
-                            )}
-                            {isExpanded && (
-                              <div className="mt-2.5 space-y-2">
-                                {step.inputPayload != null && (
-                                  <div>
-                                    <div className="text-[8px] text-[#555] tracking-wider font-semibold mb-1">
-                                      INPUT
-                                    </div>
-                                    <textarea
-                                      value={rawInput}
-                                      onChange={(e) =>
-                                        setStepInputEdits((prev) => ({
-                                          ...prev,
-                                          [i]: e.target.value,
-                                        }))
-                                      }
-                                      spellCheck={false}
-                                      className="w-full min-h-[80px] bg-[#0d0d0f] border-[0.5px] border-[#2a2a2e] rounded px-2 py-1.5 text-[10px] text-[#ccc] font-mono outline-none resize-y leading-relaxed box-border"
-                                    />
-                                    {stepInputEdits[i] != null && (
-                                      <button
-                                        onClick={() => {
-                                          try {
-                                            const parsed = JSON.parse(stepInputEdits[i]);
-                                            rerunFromStep(i, step.nodeId, parsed);
-                                            // Clear stale edits for this step and all later steps
-                                            setStepInputEdits((prev) => {
-                                              const n = { ...prev };
-                                              Object.keys(n).forEach((k) => {
-                                                if (Number(k) >= i) delete n[Number(k)];
-                                              });
-                                              return n;
-                                            });
-                                            // Keep panel open so user sees the updated input/output
-                                          } catch {
-                                            /* invalid JSON */
-                                          }
-                                        }}
-                                        className="mt-1 w-full bg-[#378ADD] hover:bg-[#4a9bef] text-white text-[9px] font-semibold py-1 rounded cursor-pointer border-none transition-colors"
-                                      >
-                                        Run from step {i + 1}
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                                {step.outputPayload != null && (
-                                  <div>
-                                    <div className="text-[8px] text-[#555] tracking-wider font-semibold mb-1">
-                                      OUTPUT{' '}
-                                      <span className="text-[#333] normal-case tracking-normal font-normal">
-                                        (precomputed)
-                                      </span>
-                                    </div>
-                                    <pre className="bg-[#0d0d0f] border-[0.5px] border-[#2a2a2e] rounded px-2 py-1.5 text-[10px] text-[#aaa] font-mono overflow-x-auto leading-relaxed whitespace-pre-wrap break-all">
-                                      {JSON.stringify(step.outputPayload, null, 2)}
-                                    </pre>
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                              {step.description && !step.description.includes('CHAIN STOP') && (
+                                <div className="text-[10px] text-[#888] leading-relaxed">
+                                  {step.description}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
