@@ -198,12 +198,23 @@ Example of correct tracing:
 RULE 7 — NODE OUTPUT CASES (output_cases)
 ══════════════════════════════════════════════
 
-output_cases let a node return different output values depending on the input payload —
-same condition system as trace match. This powers per-step input editing in the simulator:
-when the user changes a step's input at step N, the output updates deterministically,
-that output flows into step N+1 as its input, N+1's output_cases fire, and so on down the
-entire chain. Every node in the call chain MUST have output_cases that react to
-the data it actually receives — this is how the simulator stays deterministic without AI.
+output_cases are THE mechanism that makes the visual simulator work. There is NO runtime,
+NO real server, NO database, NO HTTP calls during simulation. The ONLY data each step
+receives is the previous step's output_case output. If step 3 doesn't include a field in
+its output, step 4 CANNOT access it — it does not exist. The chain is a pure data pipeline:
+
+  request body → step 1 output → step 2 output → step 3 output → ... → final output
+
+╔══════════════════════════════════════════════════════════════════╗
+║  THE SIMULATION CONTRACT                                         ║
+║                                                                  ║
+║  1. Each step's output is the ONLY input the next step receives  ║
+║  2. There are no side channels — no globals, no shared state     ║
+║  3. If a downstream step needs a field, EVERY step between the   ║
+║     source and that step MUST carry it forward in their output   ║
+║  4. output_cases define the complete data at each point — they   ║
+║     are not summaries, they are the ACTUAL simulated payload     ║
+╚══════════════════════════════════════════════════════════════════╝
 
 WHEN TO ADD output_cases:
   Add output_cases on every node whose output can vary (any node that appears in a trace
@@ -277,26 +288,41 @@ Rules:
     THEIR conditions. If business_logic needs to check "authorized", then middleware's success
     output must include an "authorized" field.
 
-HOW TO WRITE output_cases — MANDATORY PROCEDURE (do this for EVERY node in a trace):
+HOW TO WRITE output_cases — MANDATORY PROCEDURE:
 
-  For each trace this node appears in, look at the step BEFORE this node and the step AFTER:
+  There is NO runtime during simulation. Each step ONLY receives the previous step's output.
+  If step 3 drops a field, step 4+ can NEVER access it. Plan the full pipeline first.
 
-  1. LOOK UPSTREAM: What node is the previous step? What does its success output_case output?
-     → Those fields are what THIS node receives as input.
-     → Your match conditions MUST reference fields from THAT output, not the original request.
+  PLAN STEP A — MAP DATA NEEDS: For each trace, list every step and note:
+     - What fields does this node NEED from its input? (from source code)
+     - What fields does this node PRODUCE? (from return type / source code)
 
-  2. LOOK DOWNSTREAM: What node is the next step? What fields does it need to match on?
-     → Your success output MUST include those fields so the next node can evaluate its conditions.
-     → If the next node checks "ok", your output must contain an "ok" field.
+  PLAN STEP B — BUILD THE PIPELINE: Walk the trace forward. For each step's success output:
+     - Include its OWN produced fields
+     - Include ALL fields that ANY later step needs but this step didn't produce
+       (carry forward from input unchanged)
+     If step 5 needs "url" from step 1, then steps 2, 3, and 4 MUST ALL include "url".
 
-  3. CARRY FORWARD: If a downstream node (not just the next step, but ANY later step) needs a
-     field that originated earlier in the chain, you MUST carry it forward in your output.
-     Example: if step 5 needs "solver_id" that was set in step 2, steps 3 and 4 must each
-     include "solver_id" in their success outputs so it reaches step 5.
+  PLAN STEP C — WRITE output_cases:
 
-  4. WRITE SUCCESS CASE: match on upstream success fields → output includes downstream-needed fields.
-  5. WRITE ERROR CASE(S): match on upstream error/missing fields → output error + "terminates": true.
-  6. WRITE CATCH-ALL (optional): match: [] → error output + "terminates": true.
+  1. LOOK UPSTREAM: What does the previous step's success output contain?
+     → Match conditions MUST reference fields from THAT output, not the original request.
+
+  2. LOOK DOWNSTREAM: What fields does the next step need?
+     → Success output MUST include those fields.
+
+  3. CARRY FORWARD: If ANY later step needs a field from earlier, pass it through.
+     THIS IS THE #1 MISTAKE — step 3 drops a field, step 4 can't find it → chain breaks.
+     When in doubt, include the field.
+
+  4. WRITE SUCCESS CASE: match on upstream fields → output = own fields + carried fields.
+  5. WRITE ERROR CASE(S): match on error/missing → output error + "terminates": true.
+  6. WRITE CATCH-ALL (optional): match: [] → error + "terminates": true.
+
+  SELF-CHECK: After writing all output_cases, walk each trace end-to-end:
+     Take step 1's success output → does step 2's match reference those fields? ✓
+     Take step 2's success output → does step 3's match reference those fields? ✓
+     ... all the way to the last step. If any link breaks, fix it before moving on.
 
   CONCRETE EXAMPLE — 4-step chain:
     Step 1 (route_handler): receives request {"url": "...", "chains": [...]}
