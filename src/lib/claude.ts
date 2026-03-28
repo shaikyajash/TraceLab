@@ -589,6 +589,91 @@ export async function analyzeService(
       if (sgNodes.length === 0) return;
 
       const entryNode = nodeMap.get(sg.entryId);
+      
+      // Chunk nodes if subgraph is large (>15 nodes)
+      const MAX_NODES_PER_CHUNK = 15;
+      if (sgNodes.length > MAX_NODES_PER_CHUNK) {
+        options?.onProgress?.(`  ${entryNode?.name || sg.entryId} has ${sgNodes.length} nodes — chunking...`);
+        
+        // Split into chunks, keeping entry node in first chunk
+        const entryNodeObj = sgNodes.find(n => n.id === sg.entryId);
+        const otherNodes = sgNodes.filter(n => n.id !== sg.entryId);
+        
+        const chunks: typeof sgNodes[] = [];
+        if (entryNodeObj) {
+          chunks.push([entryNodeObj, ...otherNodes.slice(0, MAX_NODES_PER_CHUNK - 1)]);
+          for (let i = MAX_NODES_PER_CHUNK - 1; i < otherNodes.length; i += MAX_NODES_PER_CHUNK) {
+            chunks.push(otherNodes.slice(i, i + MAX_NODES_PER_CHUNK));
+          }
+        } else {
+          for (let i = 0; i < sgNodes.length; i += MAX_NODES_PER_CHUNK) {
+            chunks.push(sgNodes.slice(i, i + MAX_NODES_PER_CHUNK));
+          }
+        }
+        
+        // Process each chunk and merge results
+        const allComputeDefs: Record<string, unknown> = {};
+        const allInputSchemas: Record<string, unknown[]> = {};
+        
+        for (let c = 0; c < chunks.length; c++) {
+          const chunk = chunks[c];
+          const chunkNodeIds = new Set(chunk.map(n => n.id));
+          const chunkEdges = sgEdges.filter(e => chunkNodeIds.has(e.from) || chunkNodeIds.has(e.to));
+          
+          options?.onProgress?.(`  ${entryNode?.name || sg.entryId} chunk ${c + 1}/${chunks.length} (${chunk.length} nodes)...`);
+          
+          try {
+            const { system, user } = buildOutputCasesPrompt(
+              service.name,
+              chunk.map((n) => ({
+                id: n.id,
+                kind: n.kind,
+                name: n.name,
+                description: n.description ?? '',
+                input: n.input,
+                output: n.output,
+                source_code: n.source_code,
+              })),
+              chunkEdges,
+            );
+
+            const parsed = await runValidatedCall<OutputCasesResult>({
+              system,
+              user,
+              label: `compute:${entryNode?.name || sg.entryId}:chunk${c + 1}`,
+              maxRetries: 2,
+              parse: (str) => JSON.parse(str),
+              validate: (p) => validateOutputCasesResult(p),
+              onProgress: options?.onProgress,
+            });
+            
+            // Merge chunk results
+            if (parsed.compute_definitions) {
+              Object.assign(allComputeDefs, parsed.compute_definitions);
+            }
+            if (parsed.output_cases) {
+              Object.assign(allComputeDefs, parsed.output_cases);
+            }
+            if (parsed.input_schemas) {
+              Object.assign(allInputSchemas, parsed.input_schemas);
+            }
+          } catch (err) {
+            options?.onProgress?.(
+              `  Warning: chunk ${c + 1} failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+        
+        // Write merged result
+        await writeArtifact(slug, 'output_cases', sg.entryId, {
+          compute_definitions: allComputeDefs,
+          input_schemas: allInputSchemas,
+        });
+        options?.onProgress?.(`  ${entryNode?.name || sg.entryId} → ${chunks.length} chunks merged, artifact saved`);
+        return;
+      }
+
+      // Small subgraph - process as single chunk
       options?.onProgress?.(`  compute + input_schemas for ${entryNode?.name || sg.entryId}...`);
 
       try {
@@ -659,6 +744,74 @@ export async function analyzeService(
       if (sgNodes.length === 0) return;
 
       const entryNode = nodeMap.get(sg.entryId);
+      
+      // Chunk nodes if subgraph is large (>20 nodes for traces)
+      const MAX_NODES_PER_TRACE_CHUNK = 20;
+      if (sgNodes.length > MAX_NODES_PER_TRACE_CHUNK) {
+        options?.onProgress?.(`  ${entryNode?.name || sg.entryId} has ${sgNodes.length} nodes — chunking traces...`);
+        
+        // For traces, we need the full context but can generate traces in batches
+        // Split by keeping entry + first N nodes, then next N, etc.
+        const entryNodeObj = sgNodes.find(n => n.id === sg.entryId);
+        const otherNodes = sgNodes.filter(n => n.id !== sg.entryId);
+        
+        const chunks: typeof sgNodes[] = [];
+        if (entryNodeObj) {
+          // First chunk: entry + immediate downstream
+          chunks.push([entryNodeObj, ...otherNodes.slice(0, MAX_NODES_PER_TRACE_CHUNK - 1)]);
+          // Subsequent chunks: remaining nodes
+          for (let i = MAX_NODES_PER_TRACE_CHUNK - 1; i < otherNodes.length; i += MAX_NODES_PER_TRACE_CHUNK) {
+            chunks.push([entryNodeObj, ...otherNodes.slice(i, i + MAX_NODES_PER_TRACE_CHUNK)]);
+          }
+        } else {
+          for (let i = 0; i < sgNodes.length; i += MAX_NODES_PER_TRACE_CHUNK) {
+            chunks.push(sgNodes.slice(i, i + MAX_NODES_PER_TRACE_CHUNK));
+          }
+        }
+        
+        const allTraces: unknown[] = [];
+        
+        for (let c = 0; c < chunks.length; c++) {
+          const chunk = chunks[c];
+          const chunkNodeIds = new Set(chunk.map(n => n.id));
+          const chunkEdges = sgEdges.filter(e => chunkNodeIds.has(e.from) && chunkNodeIds.has(e.to));
+          
+          options?.onProgress?.(`  traces for ${entryNode?.name || sg.entryId} chunk ${c + 1}/${chunks.length}...`);
+          
+          try {
+            const { system, user } = buildTracesOnlyPrompt(
+              service.name,
+              chunk.map((n) => ({ ...n, description: n.description ?? '' })),
+              chunkEdges,
+            );
+
+            const parsed = await runValidatedCall<TracesResult>({
+              system,
+              user,
+              label: `traces:${entryNode?.name || sg.entryId}:chunk${c + 1}`,
+              maxRetries: 2,
+              parse: (str) => JSON.parse(str),
+              validate: (p) => validateTracesResult(p),
+              onProgress: options?.onProgress,
+            });
+            
+            if (parsed.traces && Array.isArray(parsed.traces)) {
+              allTraces.push(...parsed.traces);
+            }
+          } catch (err) {
+            options?.onProgress?.(
+              `  Warning: chunk ${c + 1} failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+        
+        // Write merged traces
+        await writeArtifact(slug, 'traces', sg.entryId, { traces: allTraces });
+        options?.onProgress?.(`  ${entryNode?.name || sg.entryId} → ${chunks.length} chunks merged, ${allTraces.length} traces`);
+        return;
+      }
+
+      // Small subgraph - process as single chunk
       options?.onProgress?.(`  traces for ${entryNode?.name || sg.entryId}...`);
 
       try {
