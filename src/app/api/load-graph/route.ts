@@ -24,6 +24,14 @@ export async function POST(request: NextRequest) {
   try {
     const content = await fs.readFile(filePath, 'utf-8');
     const graph = JSON.parse(content);
+    
+    // Strip source_code from nodes to reduce payload size
+    if (graph.nodes && Array.isArray(graph.nodes)) {
+      for (const node of graph.nodes) {
+        delete node.source_code;
+      }
+    }
+    
     return Response.json(graph);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to read file';

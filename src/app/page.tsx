@@ -508,6 +508,10 @@ export default function Home() {
       }
 
       if (outputPath) {
+        setScanPhase('loading');
+        setScanMessage('Loading graph visualization...');
+        setScanLogs((prev) => [...prev, 'Loading graph visualization...']);
+        
         const loadRes = await fetch('/api/load-graph', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -515,12 +519,16 @@ export default function Home() {
         });
         if (loadRes.ok) {
           const data: ComponentsGraph = await loadRes.json();
+          setScanLogs((prev) => [...prev, `Loaded ${data.nodes.length} nodes, ${data.edges.length} edges`]);
           setGraph(data);
           localStorage.setItem(STORAGE_KEYS.GRAPH, JSON.stringify(data));
           localStorage.setItem(STORAGE_KEYS.GITHUB_URL, scanInput);
         } else {
-          throw new Error('Scan completed but failed to load graph');
+          const errorData = await loadRes.json().catch(() => ({ error: `HTTP ${loadRes.status}` }));
+          throw new Error(`Failed to load graph: ${errorData.error || loadRes.statusText}`);
         }
+      } else {
+        throw new Error('Scan completed but no output path was provided');
       }
     } catch (err) {
       setError((err as Error).message);
@@ -644,11 +652,12 @@ export default function Home() {
 
   const exportGraph = useCallback(() => {
     if (!graph) return;
+    const serviceName = graph.services?.[0]?.id || 'service';
     const dataStr =
       'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(graph, null, 2));
     const downloadAnchorNode = document.createElement('a');
     downloadAnchorNode.setAttribute('href', dataStr);
-    downloadAnchorNode.setAttribute('download', 'servicelab.tracelab.json');
+    downloadAnchorNode.setAttribute('download', `tracelab-${serviceName}.tracelab.json`);
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
