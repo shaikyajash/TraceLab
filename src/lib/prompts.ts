@@ -310,6 +310,14 @@ Rules:
     WRONG: "data": "{\"orders\":[{\"id\":\"1\"}]}"   ← string containing escaped JSON
     RIGHT: "data": {"orders": [{"id": "1"}]}          ← actual parsed JSON object
   - Keep output values realistic: use the node's actual return type fields, not placeholder strings.
+  - REALISTIC DATA VALUES: Use realistic data in all example outputs:
+    * Order IDs, transaction hashes, addresses → use ACTUAL hex format: "0x1a2b3c4d5e6f..." (64 chars for hashes)
+    * Timestamps → use ISO 8601: "2025-01-01T12:00:00Z"
+    * URLs → use realistic domains: "https://api.example.com/v1/orders"
+    * Amounts → use realistic numbers: "1000000000000000000" (wei), "1.5" (ether)
+    WRONG: "create_id": "order-1", "tx_hash": "0xinit"
+    RIGHT: "create_id": "0x7f3a9c2e1b5d8f4a6e9c2b7d5f8a3e1c9b4d6f2a8e5c7b9d3f6a1e8c4b7d5f9a2"
+    RIGHT: "tx_hash": "0x4a7c3e6b9d2f5a8c1b4e7d3f6a9c2e5b8d1f4a7c3e6b9d2f5a8c1b4e7d3f6a9c"
   - STRICT STRUCT PARITY: output JSON must mirror the exact Rust struct nesting. If the code
     accesses order.create_order.create_id, the output must have {"create_order":{"create_id":"x"}},
     NOT a flattened {"create_id":"x"}. Look at source_code field access patterns to confirm nesting.
@@ -631,12 +639,19 @@ NODE — all fields required on every node (use null for optional fields with no
   "path_pattern"    string|null  URL pattern (route_handler only, else null)
   "handler"         string|null  handler fn path (route_handler only, else null)
   "source_code"     string|null  verbatim function or struct definition from source
-  "example_payload" string|null  JSON string of a realistic request body (route_handler only)
+  "example_payload" string|null  JSON string of a realistic request body (route_handler only).
+                                 Use REALISTIC data values:
+                                 * Order IDs → "0x7f3a9c2e1b5d8f4a6e9c2b7d5f8a3e1c9b4d6f2a8e5c7b9d3f6a1e8c4b7d5f9a2"
+                                 * Transaction hashes → "0x4a7c3e6b9d2f5a8c1b4e7d3f6a9c2e5b8d1f4a7c3e6b9d2f5a8c1b4e7d3f6a9c"
+                                 * Addresses → "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb"
+                                 NEVER use placeholder names like "order-1", "tx-1".
   "example_input"   object|null  realistic example JSON of data flowing INTO this node (all kinds).
                                  Generate based on the function's input type and logic.
+                                 Use realistic hex values for IDs/hashes/addresses (see above).
                                  null only if input type is () or the node takes no data.
   "example_output"  object|null  realistic example JSON of data flowing OUT of this node (all kinds).
                                  Generate based on the return type and source code logic.
+                                 Use realistic hex values for IDs/hashes/addresses (see above).
                                  null only if return type is () or void.
   "fields"          array|null   enum: [{name, type:"serde-value"}]  struct: [{name, type}]  else: null
   "output_cases"    array|null   conditional outputs — see Rule 7. Add on every node whose output varies.
@@ -1000,7 +1015,13 @@ Trace fields:
   route_id         entry point node id (route_handler, function, business_logic, etc.)
   label            short name with distinguishing condition
   description      one line: what this path does and how it ends
-  example_payload  JSON object (not string) that triggers this path
+  example_payload  JSON object (not string) that triggers this path.
+                   MUST use REALISTIC data values:
+                   * Order IDs → "0x7f3a9c2e1b5d8f4a6e9c2b7d5f8a3e1c9b4d6f2a8e5c7b9d3f6a1e8c4b7d5f9a2" (64 hex chars)
+                   * Transaction hashes → "0x4a7c3e6b9d2f5a8c1b4e7d3f6a9c2e5b8d1f4a7c3e6b9d2f5a8c1b4e7d3f6a9c" (64 hex)
+                   * Addresses → "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb" (40 hex chars)
+                   * Timestamps → "2025-01-01T12:00:00Z" (ISO 8601)
+                   NEVER use placeholder names like "order-1", "tx-1", "user-123".
   match            condition array. MAX ONE trace per entry may use []. All others MUST have conditions.
   steps            complete ordered list (see above)
 
@@ -1011,9 +1032,33 @@ Step fields:
   when           (optional) skip this step if condition fails
   input_mapping  (optional) maps previous output fields to this step's expected input shape.
                  Use when the node expects a DIFFERENT structure than the previous output.
+                 
+                 CRITICAL — ALWAYS CHECK THE FUNCTION SIGNATURE:
+                 Look at the node's source_code to see what parameters the function takes.
+                 If the function is: fn filter_orders(&mut self, orders: &[MatchedOrderVerbose])
+                 Then it expects: {"orders": [...array of orders...]}
+                 NOT: {"pending_orders": {"result": [...]}}
+                 
+                 If the previous step outputs {"pending_orders": {"result": [...]}}
+                 but this step expects {"orders": [...]}, you MUST add input_mapping:
+                   input_mapping: {"orders": "pending_orders.result"}
+                 
                  Example — node processes one order from a list:
                    input_mapping: {"create_order": "orders[0].create_order", "source_swap": "orders[0].source_swap"}
-                 Omit when the node receives the entire previous output as-is.
+                 
+                 Example — node expects flat array but upstream has nested structure:
+                   Previous output: {"response": {"data": {"items": [...]}}}
+                   Function signature: fn process(items: &[Item])
+                   input_mapping: {"items": "response.data.items"}
+                 
+                 HOW TO DECIDE: 
+                 1. Look at the node's function signature — what are the PARAMETER NAMES?
+                 2. Look at the previous step's output — what FIELDS does it have?
+                 3. If they don't match exactly, add input_mapping to bridge them.
+                 
+                 When NOT needed (omit input_mapping):
+                   - Node receives the entire previous output as-is
+                   - Previous output shape already matches this node's input type exactly
 
 Condition format: {"field": "x", "op": "eq", "value": "y"}
 Valid ops: eq, neq, in, not_in, exists, not_exists, eq_field, neq_field, eq_type`}`;
@@ -1089,34 +1134,52 @@ First character: "{". Last character: "}". No markdown, no prose, no comments.
 
 Output shape:
 {
-  "output_cases": {
-    "<node_id>": [
-      {
-        "match": [{"field": "<f>", "op": "<op>", "value": "<v>"}],
-        "output": { ... },
-        "explanation": "...",
-        "terminates": false
+  "compute_definitions": {
+    "<node_id>": {
+      "steps": [
+        {
+          "operation": "evaluate_condition",
+          "condition": {"field": "orders", "op": "exists"},
+          "output_var": "has_orders"
+        },
+        {
+          "operation": "filter",
+          "input": "orders",
+          "condition": {"field": "create_order.additional_data.is_blacklisted", "op": "eq", "value": false},
+          "output_var": "non_blacklisted_orders"
+        },
+        {
+          "operation": "map",
+          "input": "non_blacklisted_orders",
+          "transform": {
+            "order_id": "create_order.create_id",
+            "state": {"operation": "derive", "logic": "check_order_state"}
+          },
+          "output_var": "order_evaluations"
+        }
+      ],
+      "output": {
+        "ok": {"operation": "evaluate_condition", "condition": {"field": "has_orders", "op": "eq", "value": true}},
+        "orders": "$non_blacklisted_orders",
+        "evaluations": "$order_evaluations"
       },
-      {
-        "match": [],
-        "output": {"ok": false, "error": "..."},
-        "explanation": "catch-all",
+      "error_output": {
+        "condition": {"field": "has_orders", "op": "eq", "value": false},
+        "output": {"ok": false, "error": "No orders to process"},
         "terminates": true
       }
-    ]
+    }
   },
   "input_schemas": {
     "<node_id>": [
-      {"field": "url", "type": "string", "required": true, "description": "executor URL", "pattern": "^https?://"},
-      {"field": "chains", "type": "array", "required": true, "description": "chain list"},
-      {"field": "chains[0].name", "type": "string", "required": true, "description": "chain name"},
-      {"field": "action", "type": "string", "required": false, "enum": ["create", "update", "delete"]}
+      {"field": "orders", "type": "array", "required": true, "description": "matched order list"},
+      {"field": "orders[0].create_order", "type": "object", "required": true, "description": "order details"}
     ]
   }
 }
 
 Both maps use node ids as keys.
-"output_cases" values = arrays of output_case objects.
+"compute_definitions" values = compute definition objects with steps, output, and error_output.
 "input_schemas" values = arrays of field validation rules.
 Only include nodes that appear in call chains (skip struct and enum only).
 
@@ -1165,17 +1228,24 @@ Field schema properties:
 
 HOW TO WRITE input_schema:
   1. Read the node's source_code — find every validation check, guard clause, early return
-  2. For each check, extract: what field is checked, what type/format, what error is returned
-  3. Create one InputFieldSchema entry per check:
-     - field: the field being validated
+  2. Look at the FUNCTION SIGNATURE to understand what the function ACTUALLY receives:
+     - fn filter_orders(&mut self, orders: &[MatchedOrderVerbose]) → expects "orders" array directly
+     - fn process(req: Request) → expects "req" object
+     - fn validate(&self, data: &Data) → expects "data" object
+     The input_schema MUST match the function signature, NOT what the upstream node outputs.
+     If upstream outputs {"pending_orders": {"result": [...]}} but the function takes orders: &[...],
+     the input_schema should be [{"field": "orders", "type": "array", ...}].
+     The simulator will use input_mapping to extract "orders" from "pending_orders.result".
+  3. Create one InputFieldSchema entry per parameter/field the function expects:
+     - field: the PARAMETER NAME from the function signature (not the upstream output field)
      - type: from the Rust type (String → "string", Vec<> → "array", bool → "boolean", etc.)
      - required: true if the code errors when it's missing
      - error_message: the EXACT error string from the source (Err("..."), bail!("..."), etc.)
      - error_status: the HTTP status code or error kind from the source
      - pattern: if the code validates format (regex, hex, URL, etc.)
      - enum: if the code checks against a known set of values
-  4. IMPORTANT: input_schema fields must match what the PREVIOUS step outputs,
-     not the original request body (same chain-awareness as output_cases)
+  4. IMPORTANT: input_schema defines what the FUNCTION EXPECTS, not what upstream provides.
+     The simulator will automatically adapt upstream output to match this schema.
   5. If no source_code is available, omit error_message (generic fallback will be used)
 
 ══════════════════════════════════════════════
@@ -1221,37 +1291,181 @@ THE SIMULATION CONTRACT
 ╚══════════════════════════════════════════════════════════════════╝
 
 ══════════════════════════════════════════════
-HOW TO WRITE output_cases
+HOW TO WRITE COMPUTE DEFINITIONS
 ══════════════════════════════════════════════
 
-UNIFIED EXECUTION MODEL — applies to ALL node kinds equally:
-  route_handler, function, business_logic → process input, return structured result
-  middleware, validator → gate/transform input, pass or reject
-  db_call → return MOCK stored data (no real DB). Use realistic example records.
-  external_http_call → return MOCK API response (no real network). Use realistic payloads.
-  background_process → if traced, process input state (config + mock data), return categorized results
-  message_queue → process message payload, return acknowledgment or error
+COMPUTE-BASED ARCHITECTURE — Universal, works for any repo:
+Instead of hardcoding output values, define OPERATIONS that compute outputs from inputs.
+The simulator executes these operations at runtime, making it work for any data.
 
-  db_call / external_http_call are DATA SOURCES in simulation:
-    Their output_cases ARE the mock data. Different match conditions = different mock scenarios.
-    Example: a fetch_orders node could return 3 orders in one case, 0 in another, error in a third.
-    The user edits the input to select which scenario runs.
+Available operations:
+  evaluate_condition  → checks if a condition passes, returns boolean
+  filter              → filters array based on condition
+  map                 → transforms each array element
+  reduce              → aggregates array into single value
+  count               → counts array elements
+  derive              → extracts/copies a field value
+  priority_select     → returns first matching case based on conditions
 
-STEP A — For each call chain (entry point → ... → leaf), map what each node:
-  - NEEDS as input (from source code / function signature)
-  - PRODUCES as output (from return type / source code)
+COMPUTE DEFINITION STRUCTURE:
+{
+  "steps": [
+    {
+      "op": "evaluate_condition",
+      "condition": {"field": "orders", "op": "exists"},
+      "output_field": "has_orders"
+    },
+    {
+      "op": "filter",
+      "source": "orders",
+      "condition": {"field": "create_order.additional_data.is_blacklisted", "op": "eq", "value": false},
+      "output_field": "non_blacklisted_orders"
+    },
+    {
+      "op": "map",
+      "source": "non_blacklisted_orders",
+      "transform": {
+        "order": "$item",
+        "order_id": "create_order.create_id",
+        "state": "order_state"
+      },
+      "output_field": "order_evaluations"
+    },
+    {
+      "op": "filter",
+      "source": "order_evaluations",
+      "condition": {"field": "state", "op": "eq", "value": "HardFail"},
+      "output_field": "hard_fail_orders"
+    }
+  ],
+  "output": {
+    "ok": "$has_orders",
+    "orders": "$non_blacklisted_orders",
+    "order_evaluations": "$order_evaluations",
+    "cache_updates": {
+      "hard_fail_order_ids": "$hard_fail_orders"
+    }
+  }
+}
 
-STEP B — Walk each chain forward. For each node's success output, include:
-  - Its OWN produced fields
-  - ALL fields that ANY later node in the chain needs (carry forward from input)
+STEP A — Analyze the source code to identify:
+  - What validations/checks are performed (→ evaluate_condition)
+  - What filtering happens (→ filter)
+  - What transformations occur (→ map, derive)
+  - What aggregations are computed (→ reduce, count)
 
-STEP C — Write output_cases:
-  1. MATCH ON UPSTREAM: Conditions reference fields from the PREVIOUS step's output.
-  2. OUTPUT FOR DOWNSTREAM: Success output includes fields the NEXT step needs.
-  3. CARRY FORWARD: If step 5 needs "url" from step 1, steps 2-4 must all include "url".
-  4. ERROR CASES: Add "terminates": true on rejection/error outputs. The simulator
-     stops the chain there (e.g. auth failure, validation error, not-found).
-  5. CATCH-ALL: Optional match: [] as last case with "terminates": true.
+STEP B — Write compute steps in execution order:
+  1. Validate input exists/is correct
+  2. Filter out unwanted items
+  3. Transform/classify each item
+  4. Aggregate results
+  Each step stores its result in output_var for use in later steps.
+
+STEP C — Define the output object:
+  - Use $variable_name to reference step results
+  - Use nested operations for computed fields
+  - Include error_output with condition for error cases
+
+WHY COMPUTE > output_cases:
+  ✓ Works for ANY data — not hardcoded to specific order IDs
+  ✓ User can edit input and see real computation results
+  ✓ Scales to large arrays without exponential case explosion
+  ✓ Mirrors actual code logic (filter → map → reduce)
+  ✓ No need to maintain hundreds of hardcoded output values
+
+CONCRETE EXAMPLES:
+
+Example 1 — filter_orders (classifies orders by state):
+Source code pattern:
+  for order in orders {
+    if order.is_blacklisted { continue; }
+    let state = check_order_state(order);
+    match state {
+      OrderState::HardFail => hard_fail_ids.push(order.id),
+      OrderState::ImproperFill => improper_fill_ids.push(order.id),
+      ...
+    }
+  }
+
+Compute definition:
+{
+  "steps": [
+    {"op": "filter", "source": "orders", 
+     "condition": {"field": "create_order.additional_data.is_blacklisted", "op": "eq", "value": false},
+     "output_field": "non_blacklisted"},
+    {"op": "map", "source": "non_blacklisted",
+     "transform": {
+       "order_id": "create_order.create_id",
+       "is_blacklisted": "create_order.additional_data.is_blacklisted",
+       "has_init_tx": "source_swap.initiate_tx_hash",
+       "has_refund_tx": "source_swap.refund_tx_hash"
+     },
+     "output_field": "order_summaries"},
+    {"op": "filter", "source": "order_summaries",
+     "condition": {"field": "has_refund_tx", "op": "exists"},
+     "output_field": "hard_fail_orders"},
+    {"op": "map", "source": "hard_fail_orders",
+     "transform": {"id": "order_id"},
+     "output_field": "hard_fail_ids"}
+  ],
+  "output": {
+    "ok": "true",
+    "orders": "$non_blacklisted",
+    "order_summaries": "$order_summaries",
+    "cache_updates": {
+      "hard_fail_order_ids": "$hard_fail_ids"
+    }
+  }
+}
+
+Example 2 — validate_request (checks required fields):
+Source code pattern:
+  if request.url.is_empty() { return Err("URL required"); }
+  if request.chains.is_empty() { return Err("At least one chain required"); }
+  Ok(request)
+
+Compute definition:
+{
+  "steps": [
+    {"op": "evaluate_condition", "condition": {"field": "url", "op": "exists"}, "output_field": "has_url"},
+    {"op": "evaluate_condition", "condition": {"field": "chains[0]", "op": "exists"}, "output_field": "has_chains"},
+    {"op": "evaluate_condition", 
+     "condition": {"field": "$has_url", "op": "eq", "value": true, "and": [{"field": "$has_chains", "op": "eq", "value": true}]},
+     "output_field": "is_valid"}
+  ],
+  "output": {
+    "ok": "$is_valid",
+    "url": "$url",
+    "chains": "$chains"
+  }
+}
+Note: Use $ prefix to reference computed fields from previous steps.
+
+Example 3 — fetch_pending_orders (external HTTP call — use output_cases for MOCK data):
+{
+  "output_cases": [
+    {
+      "match": [{"field": "solver_orders_url", "op": "exists"}],
+      "output": {
+        "ok": true,
+        "pending_orders": {
+          "status": "success",
+          "result": [
+            {"create_order": {"create_id": "0x7f3a9c2e1b5d8f4a6e9c2b7d5f8a3e1c9b4d6f2a8e5c7b9d3f6a1e8c4b7d5f9a2"}, "source_swap": {...}}
+          ]
+        }
+      },
+      "explanation": "Mock API response with realistic hex order IDs"
+    },
+    {
+      "match": [],
+      "output": {"ok": false, "error": "Failed to fetch orders"},
+      "explanation": "API failure",
+      "terminates": true
+    }
+  ]
+}
+Note: External calls return MOCK data via output_cases. Use realistic hex IDs, not placeholders.
 
 ══════════════════════════════════════════════
 MATCH CONDITION RULES — WHAT TO MATCH ON
@@ -1407,9 +1621,19 @@ ${nodesSummary}
 EDGES:
 ${edgesSummary}
 
-Return the JSON object with output_cases and input_schemas for every node that appears in a chain.
+Return the JSON object with compute_definitions and input_schemas for every node that appears in a chain.
+
+PRIORITY: Use compute_definitions for ALL nodes that process/transform data.
+Only use output_cases for external data sources (db_call, external_http_call) that return MOCK data.
+
+For each node, analyze its source_code:
+  - Does it filter/map/classify arrays? → compute with filter/map operations
+  - Does it validate/check conditions? → compute with evaluate_condition
+  - Does it aggregate/count? → compute with count/reduce operations
+  - Is it an external call returning mock data? → output_cases with realistic mock data
+
 Do NOT include struct or enum nodes (type definitions only).
-DO include background_process, message_queue — they are executable and need output_cases.`;
+DO include background_process, message_queue — they are executable and need compute or output_cases.`;
 
   return { system, user };
 }

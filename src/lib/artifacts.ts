@@ -18,7 +18,7 @@ const TRACELAB_ROOT = process.cwd();
 const SCANS_DIR = path.join(TRACELAB_ROOT, 'scans');
 
 export interface PhaseArtifact {
-  phase: 'structure' | 'output_cases' | 'traces';
+  phase: 'structure' | 'output_cases' | 'traces' | 'compute' | 'input_schemas' | 'classifications';
   service: string;
   entry_point?: string;
   timestamp: string;
@@ -134,13 +134,26 @@ export function aggregateStructure(artifacts: PhaseArtifact[]): PerServiceResult
   return { service, nodes, edges, mutations, external_packages, traces: [] };
 }
 
-/** Aggregate Phase 2 artifacts — attach output_cases + input_schemas to nodes */
+/** Aggregate Phase 2 artifacts — attach output_cases + input_schemas + compute to nodes */
 export function aggregateOutputCases(nodes: ComponentNode[], artifacts: PhaseArtifact[]): void {
   for (const art of artifacts) {
     const data = art.data as {
       output_cases?: Record<string, NodeOutputCase[]>;
       input_schemas?: Record<string, InputFieldSchema[]>;
+      compute_definitions?: Record<string, import('./schema').ComputeDefinition>;
     };
+    
+    // Attach compute definitions (preferred)
+    if (data.compute_definitions) {
+      for (const node of nodes) {
+        const computeDef = data.compute_definitions[node.id];
+        if (computeDef) {
+          node.compute = computeDef;
+        }
+      }
+    }
+    
+    // Attach output_cases (fallback for external calls)
     if (data.output_cases) {
       for (const node of nodes) {
         const cases = data.output_cases[node.id];
@@ -149,6 +162,8 @@ export function aggregateOutputCases(nodes: ComponentNode[], artifacts: PhaseArt
         }
       }
     }
+    
+    // Attach input schemas
     if (data.input_schemas) {
       for (const node of nodes) {
         const schema = data.input_schemas[node.id];
@@ -176,4 +191,60 @@ export function aggregateTraces(artifacts: PhaseArtifact[]): RouteTrace[] {
 export async function cleanupArtifacts(slug: string): Promise<void> {
   const dir = artifactDir(slug);
   await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+}
+
+/** Aggregate compute definitions from artifacts and attach to nodes */
+export function aggregateCompute(nodes: ComponentNode[], artifacts: PhaseArtifact[]): void {
+  for (const art of artifacts) {
+    const data = art.data as {
+      compute_definitions?: Record<string, import('./schema').ComputeDefinition>;
+    };
+    if (data.compute_definitions) {
+      for (const node of nodes) {
+        const computeDef = data.compute_definitions[node.id];
+        if (computeDef) {
+          node.compute = computeDef;
+        }
+      }
+    }
+  }
+}
+
+/** Aggregate input schemas from separate artifacts */
+export function aggregateInputSchemas(nodes: ComponentNode[], artifacts: PhaseArtifact[]): void {
+  for (const art of artifacts) {
+    const data = art.data as {
+      input_schemas?: Record<string, InputFieldSchema[]>;
+    };
+    if (data.input_schemas) {
+      for (const node of nodes) {
+        const schema = data.input_schemas[node.id];
+        if (schema && Array.isArray(schema)) {
+          node.input_schema = schema;
+        }
+      }
+    }
+  }
+}
+
+/** Aggregate classifications (node kinds, why_included) from artifacts */
+export function aggregateClassifications(nodes: ComponentNode[], artifacts: PhaseArtifact[]): void {
+  for (const art of artifacts) {
+    const data = art.data as {
+      classifications?: Record<string, { kind?: string; why_included?: string }>;
+    };
+    if (data.classifications) {
+      for (const node of nodes) {
+        const classification = data.classifications[node.id];
+        if (classification) {
+          if (classification.kind) {
+            node.kind = classification.kind as ComponentNode['kind'];
+          }
+          if (classification.why_included) {
+            node.description = classification.why_included;
+          }
+        }
+      }
+    }
+  }
 }

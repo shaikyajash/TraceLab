@@ -2,6 +2,12 @@ import fs from 'fs/promises';
 import path from 'path';
 import { ComponentsGraph, PerServiceResult, CrossServiceCall, ExternalPackage } from './schema';
 import { getModelName } from './claude';
+import {
+  readArtifacts,
+  aggregateCompute,
+  aggregateInputSchemas,
+  aggregateClassifications,
+} from './artifacts';
 
 /** TraceLab project root — where all scan outputs are stored */
 const TRACELAB_ROOT = process.cwd();
@@ -78,6 +84,34 @@ export async function mergeAndWrite(
     0,
   );
 
+  // Derive slug for artifact lookup
+  const dirName = path.basename(workspacePath);
+  const slug = dirName
+    .toLowerCase()
+    .replace(/[^a-z0-9\-_]/g, '-')
+    .replace(/-+/g, '-');
+
+  // Aggregate all nodes first
+  const allNodes = perServiceResults.flatMap((r) => r.nodes);
+
+  // Load and merge input schemas (from Phase 2)
+  const inputSchemaArtifacts = await readArtifacts(slug, 'input_schemas');
+  if (inputSchemaArtifacts.length > 0) {
+    aggregateInputSchemas(allNodes, inputSchemaArtifacts);
+  }
+
+  // Load and merge compute definitions (from Phase 2b)
+  const computeArtifacts = await readArtifacts(slug, 'compute');
+  if (computeArtifacts.length > 0) {
+    aggregateCompute(allNodes, computeArtifacts);
+  }
+
+  // Load and merge classifications (from Phase 2c)
+  const classificationArtifacts = await readArtifacts(slug, 'classifications');
+  if (classificationArtifacts.length > 0) {
+    aggregateClassifications(allNodes, classificationArtifacts);
+  }
+
   const graph: ComponentsGraph = {
     meta: {
       scanned_at: new Date().toISOString(),
@@ -87,7 +121,7 @@ export async function mergeAndWrite(
       model: getModelName(),
     },
     services: perServiceResults.map((r) => r.service),
-    nodes: perServiceResults.flatMap((r) => r.nodes),
+    nodes: allNodes,
     edges: perServiceResults.flatMap((r) => r.edges),
     mutations: perServiceResults.flatMap((r) => r.mutations),
     cross_service_calls: crossServiceCalls,

@@ -38,19 +38,57 @@ export function evaluateCondition(
   cond: StepCondition | undefined | null,
   payload: unknown,
 ): boolean {
-  if (!cond || !cond.field || !cond.op) return true;
+  if (!cond || !cond.op) return true;
+  
+  // Handle logical operators
+  if (cond.op === 'and') {
+    return cond.conditions?.every((c) => evaluateCondition(c, payload)) ?? true;
+  }
+  if (cond.op === 'or') {
+    return cond.conditions?.some((c) => evaluateCondition(c, payload)) ?? false;
+  }
+  if (cond.op === 'not') {
+    return !(cond.conditions?.[0] ? evaluateCondition(cond.conditions[0], payload) : false);
+  }
+  
+  if (!cond.field) return true;
   const fieldValue = getField(payload, cond.field);
+  
   switch (cond.op) {
     case 'eq':
       return fieldValue === cond.value;
     case 'neq':
       return fieldValue !== cond.value;
+    case 'gt':
+      return typeof fieldValue === 'number' && typeof cond.value === 'number' && fieldValue > cond.value;
+    case 'gte':
+      return typeof fieldValue === 'number' && typeof cond.value === 'number' && fieldValue >= cond.value;
+    case 'lt':
+      return typeof fieldValue === 'number' && typeof cond.value === 'number' && fieldValue < cond.value;
+    case 'lte':
+      return typeof fieldValue === 'number' && typeof cond.value === 'number' && fieldValue <= cond.value;
     case 'in':
       return Array.isArray(cond.value) && cond.value.includes(String(fieldValue));
     case 'not_in':
       return Array.isArray(cond.value) && !cond.value.includes(String(fieldValue));
+    case 'contains':
+      return typeof fieldValue === 'string' && typeof cond.value === 'string' && fieldValue.includes(cond.value);
+    case 'starts_with':
+      return typeof fieldValue === 'string' && typeof cond.value === 'string' && fieldValue.startsWith(cond.value);
+    case 'ends_with':
+      return typeof fieldValue === 'string' && typeof cond.value === 'string' && fieldValue.endsWith(cond.value);
+    case 'not_empty':
+      if (Array.isArray(fieldValue)) return fieldValue.length > 0;
+      if (typeof fieldValue === 'string') return fieldValue.length > 0;
+      return fieldValue !== null && fieldValue !== undefined;
+    case 'is_empty':
+      if (Array.isArray(fieldValue)) return fieldValue.length === 0;
+      if (typeof fieldValue === 'string') return fieldValue.length === 0;
+      return fieldValue === null || fieldValue === undefined;
+    case 'is_some':
     case 'exists':
       return fieldValue !== undefined && fieldValue !== null;
+    case 'is_none':
     case 'not_exists':
       return fieldValue === undefined || fieldValue === null;
     case 'eq_field':

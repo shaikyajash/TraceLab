@@ -17,7 +17,6 @@ export interface ComponentsGraph {
   traces?: RouteTrace[];
 }
 
-/** Condition for matching a trace to a payload or filtering a step */
 export interface StepCondition {
   field: string;
   op:
@@ -29,8 +28,23 @@ export interface StepCondition {
     | 'not_exists'
     | 'eq_field'
     | 'neq_field'
-    | 'eq_type';
-  value?: string | string[];
+    | 'eq_type'
+    | 'gt'
+    | 'gte'
+    | 'lt'
+    | 'lte'
+    | 'contains'
+    | 'not_empty'
+    | 'is_empty'
+    | 'is_some'
+    | 'is_none'
+    | 'starts_with'
+    | 'ends_with'
+    | 'and'
+    | 'or'
+    | 'not';
+  value?: string | string[] | number | boolean;
+  conditions?: StepCondition[]; // For and/or/not operations
 }
 
 /** Precomputed trace — may be parametric via match/when conditions */
@@ -105,6 +119,32 @@ export interface NodeOutputCase {
   terminates?: boolean;
 }
 
+/** Compute step for dynamic output generation */
+export interface ComputeStep {
+  op:
+    | 'evaluate_condition'
+    | 'priority_select'
+    | 'filter'
+    | 'count'
+    | 'derive'
+    | 'map'
+    | 'reduce';
+  condition?: StepCondition;
+  cases?: Array<{ condition: StepCondition; value: unknown }>;
+  source?: string;
+  transform?: Record<string, string>;
+  accumulator?: string;
+  reducer?: 'sum' | 'concat' | 'merge';
+  output_field: string;
+  expression?: string;
+}
+
+/** Compute definition for a node — replaces static output_cases with dynamic computation */
+export interface ComputeDefinition {
+  steps: ComputeStep[];
+  output: Record<string, unknown>;
+}
+
 export interface ComponentNode {
   id: string;
   service: string;
@@ -143,6 +183,10 @@ export interface ComponentNode {
   /** Input schema for deterministic validation — checked BEFORE output_cases.
    *  If any field fails validation, simulation returns a precise error and terminates. */
   input_schema?: InputFieldSchema[];
+  /** Compute definition for dynamic output generation — replaces static output_cases */
+  compute?: ComputeDefinition;
+  /** Input mapping for this node — maps fields from expected input to actual parameter names */
+  input_mapping?: Record<string, string>;
   port?: number;
 }
 

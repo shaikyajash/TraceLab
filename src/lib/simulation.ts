@@ -1,5 +1,6 @@
 import { ComponentNode, InputFieldSchema, SimulationStep, TraceStepDef } from './schema';
 import { matchesAll, evaluateCondition } from './conditions';
+import { executeCompute } from './compute';
 
 /**
  * Apply explicit input_mapping to transform the previous step's output.
@@ -17,24 +18,27 @@ export function applyInputMapping(prevOutput: unknown, mapping: Record<string, s
  *
  * Strategy:
  * 1. If node has explicit input_mapping on the trace step → use that (highest priority)
- * 2. If node has input_schema → build a NEW object with ONLY the fields the schema expects,
- *    intelligently extracting values from prevOutput (nested search)
- * 3. If node has output_cases with match conditions → build object with fields they check
+ * 2. If node has input_schema → build a NEW object with ONLY the fields the schema expects
+ * 3. If node has input_mapping on the node itself → use that
  * 4. Parse the node's input type signature to understand expected structure
  * 5. Fallback: pass through prevOutput as-is
  *
- * The key insight: we DON'T just carry forward all previous fields. Instead, we build
- * a FRESH object that matches the expected input structure, populating it with data
- * from prevOutput wherever we can find it.
+ * The key insight: Build a FRESH object that matches the function signature,
+ * extracting values from prevOutput based on the expected input type.
  */
 export function adaptInput(
   prevOutput: unknown,
   node: ComponentNode,
   stepMapping?: Record<string, string>,
 ): unknown {
-  // Priority 1: explicit input_mapping
+  // Priority 1: explicit input_mapping from trace step
   if (stepMapping && Object.keys(stepMapping).length > 0) {
     return applyInputMapping(prevOutput, stepMapping);
+  }
+
+  // Priority 2: input_mapping on the node itself
+  if (node.input_mapping && Object.keys(node.input_mapping).length > 0) {
+    return applyInputMapping(prevOutput, node.input_mapping);
   }
 
   if (typeof prevOutput !== 'object' || prevOutput === null || Array.isArray(prevOutput)) {
@@ -43,28 +47,27 @@ export function adaptInput(
 
   const prev = prevOutput as Record<string, unknown>;
 
-  // Priority 2: auto-adapt using input_schema (BUILD expected structure)
+  // Priority 3: Build input from input_schema (ONLY expected fields)
   if (node.input_schema && node.input_schema.length > 0) {
     const adapted: Record<string, unknown> = {};
 
     for (const field of node.input_schema) {
       const rootKey = field.field.split('.')[0].split('[')[0];
 
-      // First check if the field exists at root level in prevOutput
+      // Check if field exists at root level
       if (rootKey in prev) {
         adapted[rootKey] = prev[rootKey];
         continue;
       }
 
-      // Search for the field in nested structures
+      // Search nested structures
       const found = deepFind(prev, rootKey);
       if (found !== undefined) {
         adapted[rootKey] = found;
         continue;
       }
 
-      // If required field not found, leave it undefined (validation will catch it)
-      // If optional, skip it
+      // Required field not found - leave undefined (validation will catch it)
       if (field.required) {
         adapted[rootKey] = undefined;
       }
@@ -73,20 +76,18 @@ export function adaptInput(
     return adapted;
   }
 
-  // Priority 3: Parse input type signature to understand expected structure
+  // Priority 4: Parse input type signature
   if (node.input) {
     const expectedFields = extractFieldsFromTypeSignature(node.input);
     if (expectedFields.length > 0) {
       const adapted: Record<string, unknown> = {};
 
       for (const fieldName of expectedFields) {
-        // Check if field exists at root level
         if (fieldName in prev) {
           adapted[fieldName] = prev[fieldName];
           continue;
         }
 
-        // Deep search for the field
         const found = deepFind(prev, fieldName);
         if (found !== undefined) {
           adapted[fieldName] = found;
@@ -97,37 +98,7 @@ export function adaptInput(
     }
   }
 
-  // Priority 4: auto-adapt using output_cases match conditions
-  if (node.output_cases && node.output_cases.length > 0) {
-    const adapted: Record<string, unknown> = {};
-    const fieldsNeeded = new Set<string>();
-
-    for (const oc of node.output_cases) {
-      if (!oc.match) continue;
-      for (const cond of oc.match) {
-        if (!cond.field) continue;
-        const rootKey = cond.field.split('.')[0].split('[')[0];
-        fieldsNeeded.add(rootKey);
-      }
-    }
-
-    for (const rootKey of fieldsNeeded) {
-      if (rootKey in prev) {
-        adapted[rootKey] = prev[rootKey];
-        continue;
-      }
-
-      const found = deepFind(prev, rootKey);
-      if (found !== undefined) {
-        adapted[rootKey] = found;
-      }
-    }
-
-    if (Object.keys(adapted).length > 0) {
-      return adapted;
-    }
-  }
-
+  // Fallback: pass through as-is
   return prevOutput;
 }
 
@@ -527,6 +498,31 @@ function validateInputSchema(
 // ─── Main resolution ────────────────────────────────────────────────
 
 export function resolveNodeOutput(node: ComponentNode, inputPayload: unknown): ResolvedOutput {
+  // Phase 0: If node has compute definition, use that (highest priority)
+  if (node.compute) {
+    try {
+      const output = executeCompute(node.compute, inputPayload);
+      // Check if output indicates termination (error case)
+      const terminates = 
+        (typeof output === 'object' && output !== null && 'err' in output) ||
+        (typeof output === 'object' && output !== null && 'ok' in output && output.ok === false);
+      return {
+        output,
+        terminates,
+        explanation: 'Output computed dynamically from input',
+      };
+    } catch (err) {
+      return {
+        output: {
+          ok: false,
+          error: `Compute execution failed: ${err instanceof Error ? err.message : String(err)}`,
+        },
+        terminates: true,
+        explanation: 'Compute error',
+      };
+    }
+  }
+
   // Phase 1: Validate against input_schema — repo-accurate error messages
   // Only terminates if the field has an explicit error_message or error_status (source-derived).
   // Auto-derived schemas without these may mismatch the chain — fall through to output_cases.

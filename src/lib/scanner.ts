@@ -13,9 +13,9 @@ const SKIP_DIRS = new Set([
   'benches',
   'examples',
 ]);
-const MAX_FILE_SIZE = 200 * 1024; // 200KB per file (we split large ones, so raise the skip threshold)
-const MAX_TOTAL_CHARS = 400_000; // ~100k tokens total per service
-const FILE_SPLIT_THRESHOLD = 30_000; // 30K chars (~7.5K tokens) — split files larger than this
+const MAX_FILE_SIZE = 200 * 1024; // 200KB per file
+const MAX_TOTAL_CHARS = 1_600_000; // ~400k tokens total per service (gpt-5 can handle it)
+const FILE_SPLIT_THRESHOLD = 100_000; // 100K chars — split files larger than this
 
 /**
  * Strip #[cfg(test)] mod blocks from Rust source.

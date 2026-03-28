@@ -153,9 +153,16 @@ async function runAnalysisCall(
 interface OutputCasesResult {
   output_cases?: Record<string, unknown[]>;
   input_schemas?: Record<string, unknown[]>;
+  compute_definitions?: Record<string, unknown>;
 }
 
-// Fields that indicate config/internal state — never valid in match conditions
+interface ComputeResult {
+  compute_definitions?: Record<string, unknown>;
+}
+
+interface ClassificationResult {
+  classifications?: Record<string, { kind?: string; why_included?: string }>;
+}
 const BANNED_MATCH_FIELDS = new Set([
   'client',
   'config',
@@ -232,9 +239,27 @@ function validateOutputCasesResult(parsed: unknown): string[] {
     return errors;
   }
   const obj = parsed as Record<string, unknown>;
-  if (!obj.output_cases || typeof obj.output_cases !== 'object') {
-    errors.push('Missing "output_cases" object in response');
-  } else {
+  
+  // Validate compute_definitions if present (preferred)
+  if (obj.compute_definitions && typeof obj.compute_definitions === 'object') {
+    const cd = obj.compute_definitions as Record<string, unknown>;
+    for (const [nodeId, def] of Object.entries(cd)) {
+      if (typeof def !== 'object' || def === null) {
+        errors.push(`compute_definitions["${nodeId}"] is not an object`);
+        continue;
+      }
+      const d = def as Record<string, unknown>;
+      if (!Array.isArray(d.steps)) {
+        errors.push(`compute_definitions["${nodeId}"].steps is not an array`);
+      }
+      if (!d.output || typeof d.output !== 'object') {
+        errors.push(`compute_definitions["${nodeId}"].output is not an object`);
+      }
+    }
+  }
+  
+  // Validate output_cases if present (legacy/fallback)
+  if (obj.output_cases && typeof obj.output_cases === 'object') {
     const oc = obj.output_cases as Record<string, unknown>;
     for (const [nodeId, cases] of Object.entries(oc)) {
       if (!Array.isArray(cases)) {
@@ -274,6 +299,12 @@ function validateOutputCasesResult(parsed: unknown): string[] {
       }
     }
   }
+  
+  // At least one of compute_definitions or output_cases should be present
+  if (!obj.compute_definitions && !obj.output_cases) {
+    errors.push('Response must contain either "compute_definitions" or "output_cases"');
+  }
+  
   return errors;
 }
 
@@ -307,6 +338,48 @@ function validateTracesResult(parsed: unknown): string[] {
         }
       }
     }
+  }
+  return errors;
+}
+
+function validateComputeResult(parsed: unknown): string[] {
+  const errors: string[] = [];
+  if (typeof parsed !== 'object' || parsed === null) {
+    errors.push('Response is not a JSON object');
+    return errors;
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (!obj.compute_definitions || typeof obj.compute_definitions !== 'object') {
+    errors.push('Missing "compute_definitions" object in response');
+    return errors;
+  }
+  const defs = obj.compute_definitions as Record<string, unknown>;
+  for (const [nodeId, def] of Object.entries(defs)) {
+    if (typeof def !== 'object' || def === null) {
+      errors.push(`compute_definitions["${nodeId}"] is not an object`);
+      continue;
+    }
+    const d = def as Record<string, unknown>;
+    if (!Array.isArray(d.steps)) {
+      errors.push(`compute_definitions["${nodeId}"].steps is not an array`);
+    }
+    if (!d.output || typeof d.output !== 'object') {
+      errors.push(`compute_definitions["${nodeId}"].output is not an object`);
+    }
+  }
+  return errors;
+}
+
+function validateClassificationResult(parsed: unknown): string[] {
+  const errors: string[] = [];
+  if (typeof parsed !== 'object' || parsed === null) {
+    errors.push('Response is not a JSON object');
+    return errors;
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (!obj.classifications || typeof obj.classifications !== 'object') {
+    errors.push('Missing "classifications" object in response');
+    return errors;
   }
   return errors;
 }
@@ -491,7 +564,7 @@ export async function analyzeService(
     `Phase 1 complete: ${merged.nodes.length} nodes, ${merged.edges.length} edges`,
   );
 
-  // ── Phase 2: Output cases + input schemas (parallel per entry, persisted) ──
+  // ── Phase 2: Compute definitions + input schemas (parallel per entry, persisted) ──
   const subgraphs = extractEntrySubgraphs(merged.nodes, merged.edges);
   const SKIP_KINDS = new Set(['struct', 'enum']);
   const nodeMap = new Map(merged.nodes.map((n) => [n.id, n]));
@@ -500,7 +573,7 @@ export async function analyzeService(
     const doneOC = await completedEntries(slug, 'output_cases');
 
     options?.onProgress?.(
-      `Phase 2: ${subgraphs.length} entry point(s), ${doneOC.size} already done — generating output_cases...`,
+      `Phase 2: ${subgraphs.length} entry point(s), ${doneOC.size} already done — generating compute + input_schemas...`,
     );
 
     const phase2Tasks = subgraphs.map((sg) => async () => {
@@ -516,7 +589,7 @@ export async function analyzeService(
       if (sgNodes.length === 0) return;
 
       const entryNode = nodeMap.get(sg.entryId);
-      options?.onProgress?.(`  output_cases for ${entryNode?.name || sg.entryId}...`);
+      options?.onProgress?.(`  compute + input_schemas for ${entryNode?.name || sg.entryId}...`);
 
       try {
         const { system, user } = buildOutputCasesPrompt(
@@ -536,7 +609,7 @@ export async function analyzeService(
         const parsed = await runValidatedCall<OutputCasesResult>({
           system,
           user,
-          label: `output_cases:${entryNode?.name || sg.entryId}`,
+          label: `compute:${entryNode?.name || sg.entryId}`,
           maxRetries: 2,
           parse: (str) => JSON.parse(str),
           validate: (p) => validateOutputCasesResult(p),
@@ -547,19 +620,21 @@ export async function analyzeService(
         options?.onProgress?.(`  ${entryNode?.name || sg.entryId} → artifact saved`);
       } catch (err) {
         options?.onProgress?.(
-          `  Warning: output_cases failed for ${sg.entryId}: ${err instanceof Error ? err.message : String(err)}`,
+          `  Warning: compute generation failed for ${sg.entryId}: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     });
 
     await runParallel(phase2Tasks, PHASE_CONCURRENCY);
 
-    // Aggregate and attach to nodes
+    // Aggregate and attach to nodes (handles both compute_definitions and output_cases)
     const ocArtifacts = await readArtifacts(slug, 'output_cases');
     aggregateOutputCases(merged.nodes, ocArtifacts);
 
+    const computeCount = merged.nodes.filter((n) => n.compute).length;
+    const outputCasesCount = merged.nodes.filter((n) => n.output_cases?.length).length;
     options?.onProgress?.(
-      `Phase 2 complete: ${merged.nodes.filter((n) => n.output_cases?.length).length} nodes with output_cases`,
+      `Phase 2 complete: ${computeCount} nodes with compute, ${outputCasesCount} with output_cases`,
     );
   }
 

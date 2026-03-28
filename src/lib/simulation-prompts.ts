@@ -32,7 +32,15 @@ Output schema:
   "output_payload": { ... },
   "explanation": "One or two sentences explaining what this component does to the data",
   "diff_summary": "Brief description of what changed between input and output"
-}`;
+}
+
+CRITICAL — REALISTIC DATA VALUES:
+All generated data MUST use realistic formats:
+  * Order IDs, transaction hashes → 64-character hex strings: "0x7f3a9c2e1b5d8f4a6e9c2b7d5f8a3e1c9b4d6f2a8e5c7b9d3f6a1e8c4b7d5f9a2"
+  * Ethereum addresses → 40-character hex (with 0x prefix): "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb"
+  * Timestamps → ISO 8601: "2025-01-01T12:00:00Z"
+  * UUIDs → standard format: "550e8400-e29b-41d4-a716-446655440000"
+NEVER use placeholder names like "order-1", "tx-hash-1", "user-123", "item_1".`;
 
   // ── Trace-aware rules (the key upgrade) ──
   if (traceContext) {
