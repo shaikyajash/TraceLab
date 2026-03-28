@@ -42,9 +42,9 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
 # Install git for clone-and-scan functionality
-COPY --from=deps /usr/bin/git /usr/bin/git
-COPY --from=deps /usr/lib/libpcre2-8.so.0 /usr/lib/
-COPY --from=deps /usr/lib/libz.so.1 /usr/lib/
+# Update ca-certificates first to fix TLS issues
+RUN apk add --no-cache ca-certificates && \
+    apk add --no-cache git git-lfs
 
 COPY --from=builder /app/public ./public
 
