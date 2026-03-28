@@ -8,6 +8,7 @@ import { analyzeService, analyzeCrossService } from '@/lib/claude';
 import { mergeAndWrite, loadExisting, getOutputPath } from '@/lib/merger';
 import { ScanProgress, PerServiceResult } from '@/lib/schema';
 import { setProvider, type LLMProvider } from '@/lib/llm';
+import { sanitize, sanitizeError } from '@/lib/sanitize';
 
 function encode(progress: ScanProgress): string {
   return JSON.stringify(progress) + '\n';
@@ -83,7 +84,12 @@ export async function POST(request: NextRequest) {
       const send = (progress: ScanProgress) => {
         if (closed) return;
         try {
-          controller.enqueue(new TextEncoder().encode(encode(progress)));
+          // Sanitize message before sending to frontend
+          const sanitized = {
+            ...progress,
+            message: sanitize(progress.message),
+          };
+          controller.enqueue(new TextEncoder().encode(encode(sanitized)));
         } catch {
           closed = true;
         }
@@ -132,7 +138,11 @@ export async function POST(request: NextRequest) {
 
         /* remove any leftover from a previous run */
         await fs.rm(clonePath, { recursive: true, force: true }).catch(() => { });
-        send({ phase: 'discovering', message: `Cloning ${trimmed}...` });
+        
+        // Sanitize URL for display (remove credentials)
+        const displayUrl = sanitize(trimmed);
+        send({ phase: 'discovering', message: `Cloning ${displayUrl}...` });
+        
         const gitUrl = normalizeGitUrl(trimmed);
 
         // inject credentials into URL
@@ -257,7 +267,7 @@ export async function POST(request: NextRequest) {
           },
         });
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
+        const message = sanitizeError(err);
         send({ phase: 'error', message });
         /* clean up on error too */
         if (clonePath) {

@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Checkbox } from '@/components/ui/checkbox';
+import { useEffect, useRef } from 'react';
 
 interface LandingPageProps {
   githubUrl: string;
@@ -17,6 +18,7 @@ interface LandingPageProps {
   isScanning: boolean;
   scanPhase: string;
   scanMessage: string;
+  scanLogs: string[];
   error: string | null;
   handleScan: () => void;
   handleUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -40,10 +42,18 @@ export default function LandingPage(props: LandingPageProps) {
     isScanning,
     scanPhase,
     scanMessage,
+    scanLogs,
     error,
     handleScan,
     handleUpload,
   } = props;
+
+  const logsEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when new logs arrive
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [scanLogs]);
 
   return (
     <div className="bg-[#0d0d0f] text-[#ddd] min-h-screen flex items-center justify-center p-6">
@@ -147,8 +157,21 @@ export default function LandingPage(props: LandingPageProps) {
                     {PHASE_LABELS[scanPhase] || scanPhase}
                   </span>
                 </div>
-                <AlertDescription className="text-xs text-[#666] leading-relaxed pl-5">
-                  {scanMessage}
+                <AlertDescription className="text-xs text-[#666] leading-relaxed">
+                  <div className="max-h-48 overflow-y-auto space-y-1 font-mono scrollbar-thin scrollbar-thumb-[#378ADD] scrollbar-track-[#1a1a1c]">
+                    {scanLogs.length > 0 ? (
+                      <>
+                        {scanLogs.map((log, idx) => (
+                          <div key={idx} className="pl-5 py-0.5 text-[#888]">
+                            {log}
+                          </div>
+                        ))}
+                        <div ref={logsEndRef} />
+                      </>
+                    ) : (
+                      <div className="pl-5">{scanMessage}</div>
+                    )}
+                  </div>
                 </AlertDescription>
               </Alert>
             )}

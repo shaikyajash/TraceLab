@@ -137,6 +137,7 @@ export default function Home() {
   const [isScanning, setIsScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState('');
   const [scanPhase, setScanPhase] = useState<string>('');
+  const [scanLogs, setScanLogs] = useState<string[]>([]);
   const [forceRescan, setForceRescan] = useState(false);
 
   /* restore session from localStorage on mount */
@@ -457,6 +458,7 @@ export default function Home() {
     setError(null);
     setScanMessage('Starting...');
     setScanPhase('discovering');
+    setScanLogs([]);
 
     try {
       const res = await fetch(usingSystemPath ? '/api/scan' : '/api/clone-and-scan', {
@@ -491,6 +493,7 @@ export default function Home() {
             const progress: ScanProgress = JSON.parse(line);
             setScanPhase(progress.phase);
             setScanMessage(progress.message);
+            setScanLogs((prev) => [...prev, progress.message]);
 
             if (progress.phase === 'done' && progress.summary) {
               outputPath = progress.summary.outputPath;
@@ -525,6 +528,8 @@ export default function Home() {
       setIsScanning(false);
       setScanPhase('');
       setScanMessage('');
+      // Keep logs visible for a moment after completion
+      setTimeout(() => setScanLogs([]), 3000);
     }
   }, [githubUrl, forceRescan, parseGitInput, isSystemPathInput, normalizeSystemPath]);
 
@@ -1125,6 +1130,7 @@ export default function Home() {
         isScanning={isScanning}
         scanPhase={scanPhase}
         scanMessage={scanMessage}
+        scanLogs={scanLogs}
         error={error}
         handleScan={handleScan}
         handleUpload={handleUpload}

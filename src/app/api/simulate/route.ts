@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { SimulationEvent, SimulationRequest } from '@/lib/schema';
 import { simulateNode } from '@/lib/simulation';
 import { resolveTrace } from '@/lib/trace-resolver';
+import { sanitize, sanitizeError } from '@/lib/sanitize';
 
 function encode(event: SimulationEvent): string {
   return JSON.stringify(event) + '\n';
@@ -23,7 +24,12 @@ export async function POST(request: NextRequest) {
       const send = (event: SimulationEvent) => {
         if (closed) return;
         try {
-          controller.enqueue(new TextEncoder().encode(encode(event)));
+          // Sanitize any messages before sending to frontend
+          const sanitized = {
+            ...event,
+            message: event.message ? sanitize(event.message) : undefined,
+          };
+          controller.enqueue(new TextEncoder().encode(encode(sanitized)));
         } catch {
           closed = true;
         }
@@ -100,7 +106,7 @@ export async function POST(request: NextRequest) {
 
         send({ type: 'complete', message: 'Simulation complete' });
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Simulation error';
+        const message = sanitizeError(err);
         send({ type: 'error', message });
       } finally {
         close();

@@ -5,6 +5,7 @@ import { analyzeService, analyzeCrossService } from '@/lib/claude';
 import { mergeAndWrite, loadExisting, getOutputFileName } from '@/lib/merger';
 import { ScanProgress, PerServiceResult } from '@/lib/schema';
 import { setProvider, type LLMProvider } from '@/lib/llm';
+import { sanitize, sanitizeError } from '@/lib/sanitize';
 
 function encodeProgress(progress: ScanProgress): string {
   return JSON.stringify(progress) + '\n';
@@ -31,7 +32,12 @@ export async function POST(request: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       const send = (progress: ScanProgress) => {
-        controller.enqueue(new TextEncoder().encode(encodeProgress(progress)));
+        // Sanitize message before sending to frontend
+        const sanitized = {
+          ...progress,
+          message: sanitize(progress.message),
+        };
+        controller.enqueue(new TextEncoder().encode(encodeProgress(sanitized)));
       };
 
       try {
@@ -173,7 +179,7 @@ export async function POST(request: NextRequest) {
           },
         });
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unknown error';
+        const message = sanitizeError(err);
         send({ phase: 'error', message });
       } finally {
         controller.close();
