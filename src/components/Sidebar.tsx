@@ -27,6 +27,7 @@ interface SidebarProps {
   reqBody: string;
   setReqBody: (body: string) => void;
   runSimulation: () => void;
+  runSimulationFromNode?: (nodeId: string, inputPayload: unknown) => Promise<void>;
   isTracing: boolean;
   traceSteps: any[];
   traceVisible: number;
@@ -296,6 +297,7 @@ export default function Sidebar(props: SidebarProps) {
     reqBody,
     setReqBody,
     runSimulation,
+    runSimulationFromNode,
     isTracing,
     traceSteps,
     traceVisible,
@@ -319,6 +321,9 @@ export default function Sidebar(props: SidebarProps) {
   const [stepInputEdits, setStepInputEdits] = useState<Record<number, string>>({});
   // Per-step check results — populated on "Save & Check" click
   const [checkResults, setCheckResults] = useState<Record<number, CheckResult>>({});
+  // Node input mode (double-click on node)
+  const [nodeInputMode, setNodeInputMode] = useState<string | null>(null);
+  const [nodeInputValue, setNodeInputValue] = useState('{\n  \n}');
 
   const traceFlowRef = useRef<HTMLDivElement>(null);
   const inspectorRef = useRef<HTMLDivElement>(null);
@@ -327,6 +332,31 @@ export default function Sidebar(props: SidebarProps) {
 
   const selectedEntryNode = traceRouteId ? nodeById(traceRouteId) : undefined;
   const isHttpEntry = selectedEntryNode?.kind === 'route_handler';
+
+  // Listen for node double-click events
+  useEffect(() => {
+    const handleNodeDoubleClick = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      const nodeId = customEvent.detail?.nodeId;
+      if (nodeId) {
+        const node = nodeById(nodeId);
+        if (node) {
+          setNodeInputMode(nodeId);
+          // Pre-populate with example input if available
+          if (node.example_input) {
+            setNodeInputValue(JSON.stringify(node.example_input, null, 2));
+          } else if (node.example_payload) {
+            setNodeInputValue(JSON.stringify(node.example_payload, null, 2));
+          } else {
+            setNodeInputValue('{\n  \n}');
+          }
+        }
+      }
+    };
+
+    window.addEventListener('nodeDoubleClick', handleNodeDoubleClick);
+    return () => window.removeEventListener('nodeDoubleClick', handleNodeDoubleClick);
+  }, [nodeById]);
 
   const handleSimulate = () => {
     runSimulation();
@@ -471,8 +501,8 @@ export default function Sidebar(props: SidebarProps) {
           <Field label="DESCRIPTION">{selectedNode.description}</Field>
         )}
 
-        {/* Input editor */}
-        {expandedStep !== null && (
+        {/* Input editor - only show when paused at breakpoint */}
+        {expandedStep !== null && isPausedAtBreakpoint && (
           <div>
             <Field label="INPUT">
               <textarea
@@ -674,7 +704,8 @@ export default function Sidebar(props: SidebarProps) {
       className="min-w-[200px] max-w-[600px] border-r-[0.5px] border-[#2a2a2e] bg-[#0d0d0f] flex flex-col overflow-hidden shrink-0"
       style={{ width }}
     >
-      {/* Simulate Header */}
+      {/* Simulate Header - hidden when paused at breakpoint */}
+      {!isPausedAtBreakpoint && (
       <div className="p-4 border-b-[0.5px] border-[#2a2a2e]">
         <div className="flex items-center justify-between mb-3 mt-0.5">
           <div className="text-[10px] text-[#666] tracking-[1.2px] font-semibold">SIMULATE</div>
@@ -764,6 +795,7 @@ export default function Sidebar(props: SidebarProps) {
           </Button>
         )}
       </div>
+      )}
 
       {/* Sections Content */}
       <div 
@@ -779,6 +811,60 @@ export default function Sidebar(props: SidebarProps) {
             display: ${isTracing ? 'none' : 'block'};
           }
         `}</style>
+
+        {/* NODE INPUT MODE - appears when double-clicking a node (always visible) */}
+        {nodeInputMode && (
+          <CollapsibleSection
+            title="NODE INPUT"
+            isOpen={true}
+            onToggle={() => setNodeInputMode(null)}
+          >
+            <div className="space-y-2">
+              <div className="text-[11px] text-[#ddd] font-semibold mb-2">
+                {nodeById(nodeInputMode)?.name || nodeInputMode}
+              </div>
+              <div className="text-[9px] text-[#666] mb-2">
+                Provide input to start simulation from this node
+              </div>
+              <textarea
+                value={nodeInputValue}
+                onChange={(e) => setNodeInputValue(e.target.value)}
+                placeholder='{"key": "value"}'
+                spellCheck={false}
+                className="w-full min-h-[100px] bg-[#111114] border-[0.5px] border-[#2a2a2e] rounded-md p-2.5 text-[#ddd] text-[11px] outline-none box-border resize-y leading-relaxed mb-2"
+              />
+              <Button
+                onClick={() => {
+                  try {
+                    const input = JSON.parse(nodeInputValue);
+                    // Close node input mode
+                    setNodeInputMode(null);
+                    // Run simulation from this node independently
+                    if (runSimulationFromNode) {
+                      runSimulationFromNode(nodeInputMode, input);
+                      setTraceFlowOpen(true);
+                      setInspectorOpen(false);
+                      setParamsOpen(false);
+                      setBodyOpen(false);
+                    }
+                  } catch (err) {
+                    setError('Invalid JSON input');
+                  }
+                }}
+                className="w-full bg-[#1D9E75] hover:bg-[#2ab88f] text-white text-[10px] font-semibold"
+              >
+                Start Simulation from This Node
+              </Button>
+              <Button
+                onClick={() => setNodeInputMode(null)}
+                className="w-full bg-transparent border border-[#2a2a2e] hover:border-[#666] text-[#888] hover:text-[#aaa] text-[10px] font-semibold"
+              >
+                Cancel
+              </Button>
+            </div>
+          </CollapsibleSection>
+        )}
+
         {!traceRouteId ? (
           <>
             <CollapsibleSection
@@ -808,16 +894,6 @@ export default function Sidebar(props: SidebarProps) {
                 {renderInspectorContent()}
               </CollapsibleSection>
             </div>
-
-            <CollapsibleSection
-              title={<div className="flex items-center gap-2"><span>TRACE FLOW</span></div>}
-              isOpen={false}
-              onToggle={() => setTraceFlowOpen(!traceFlowOpen)}
-            >
-              <div className="text-[#555] text-[11px] text-center my-4 leading-relaxed">
-                No trace available<br />Run a simulation first
-              </div>
-            </CollapsibleSection>
           </>
         ) : (
           <>
@@ -868,119 +944,112 @@ export default function Sidebar(props: SidebarProps) {
                 {renderInspectorContent()}
               </CollapsibleSection>
             </div>
+          </>
+        )}
 
-            {/* TRACE FLOW */}
-            <CollapsibleSection
-              title={
-                <div className="flex items-center gap-2">
-                  <span>TRACE FLOW</span>
-                  {traceSteps.length > 0 && (
-                    <span
-                      className={`tracking-normal ${
-                        traceSteps.some((s) => s.terminated)
-                          ? 'text-[#f59e0b]'
-                          : !isTracing && traceVisible > 0 && traceVisible === traceSteps.length
-                            ? 'text-[#378ADD]'
-                            : 'text-[#555]'
-                      }`}
-                    >
-                      {traceVisible} / {traceSteps.length}
-                    </span>
-                  )}
-                </div>
-              }
-              isOpen={traceFlowOpen}
-              onToggle={() => setTraceFlowOpen(!traceFlowOpen)}
-            >
-              <div ref={traceFlowRef}>
-                {traceSteps.length > 0 ? (
-                  <>
-                    {traceSteps.slice(0, traceVisible).map((step, i) => {
-                      const colors = KIND_COLORS[step.kind] || KIND_COLORS.business_logic;
-                      return (
-                        <div
-                          key={i}
-                          id={`trace-step-${i}`}
-                          className="relative mb-3 mt-5"
-                          style={{ animation: 'fadeInBlur 0.4s ease-out', animationFillMode: 'both' }}
-                        >
-                          {i > 0 && (
-                            <div className="flex flex-col items-center py-1.5">
-                              <div className="w-[2px] h-4 bg-gradient-to-b from-[#378ADD] to-[#378ADD]/30" />
-                              {step.edgeLabel && (
-                                <span className="text-[9px] text-[#666] italic font-medium mt-1">
-                                  {step.edgeLabel}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          <div className="relative pt-2">
-                            <div
-                              className={`absolute left-1/2 -translate-x-1/2 -top-2 w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] text-white ${
-                                step.terminated ? 'bg-[#f59e0b]' : 'bg-[#378ADD]'
-                              }`}
-                            >
-                              {i + 1}
-                            </div>
-                            <div
-                              className="bg-[#111114] rounded-lg p-2.5 transition-all hover:bg-[#0d0d0f] hover:shadow-lg cursor-pointer"
-                              style={{
-                                border: step.terminated
-                                  ? `1px solid #ef9f27`
-                                  : `1px solid ${colors.border}40`,
-                              }}
-                              onClick={() => {
-                                const node = nodeById(step.nodeId);
-                                if (node) {
-                                  setSelectedId(step.nodeId);
-                                  setInspectorOpen(true);
-                                  setExpandedStep(i);
-                                  // Clear check result when switching steps
-                                  setCheckResults((prev) => {
-                                    const n = { ...prev };
-                                    delete n[i];
-                                    return n;
-                                  });
-                                  setTimeout(() => {
-                                    if (step.terminated && errorRef.current) {
-                                      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                    } else {
-                                      inspectorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                                    }
-                                  }, 100);
-                                }
-                              }}
-                            >
-                              <div className="flex items-center gap-1.5 mb-1.5">
-                                <div
-                                  className="text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide"
-                                  style={{ background: colors.badgeBg, color: colors.badgeText }}
-                                >
-                                  {KIND_LABELS[step.kind] || step.kind}
-                                </div>
-                                <span className="text-[10px] text-[#ddd] font-semibold flex-1 truncate">
-                                  {step.name}
-                                </span>
-                              </div>
-                              {step.description && !step.description.includes('CHAIN STOP') && (
-                                <div className="text-[10px] text-[#888] leading-relaxed">
-                                  {step.description}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </>
-                ) : (
-                  <div className="text-[#555] text-[11px] text-center my-4 leading-relaxed">
-                    No trace available<br />Run a simulation first
-                  </div>
+        {/* TRACE FLOW - Always visible when there are steps */}
+        {traceSteps.length > 0 && (
+          <CollapsibleSection
+            title={
+              <div className="flex items-center gap-2">
+                <span>TRACE FLOW</span>
+                {traceSteps.length > 0 && (
+                  <span
+                    className={`tracking-normal ${
+                      traceSteps.some((s) => s.terminated)
+                        ? 'text-[#f59e0b]'
+                        : !isTracing && traceVisible > 0 && traceVisible === traceSteps.length
+                          ? 'text-[#378ADD]'
+                          : 'text-[#555]'
+                    }`}
+                  >
+                    {traceVisible} / {traceSteps.length}
+                  </span>
                 )}
               </div>
-            </CollapsibleSection>
-          </>
+            }
+            isOpen={traceFlowOpen}
+            onToggle={() => setTraceFlowOpen(!traceFlowOpen)}
+          >
+            <div ref={traceFlowRef}>
+              {traceSteps.slice(0, traceVisible).map((step, i) => {
+                const colors = KIND_COLORS[step.kind] || KIND_COLORS.business_logic;
+                return (
+                  <div
+                    key={i}
+                    id={`trace-step-${i}`}
+                    className="relative mb-3 mt-5"
+                    style={{ animation: 'fadeInBlur 0.4s ease-out', animationFillMode: 'both' }}
+                  >
+                    {i > 0 && (
+                      <div className="flex flex-col items-center py-1.5">
+                        <div className="w-[2px] h-4 bg-linear-to-b from-[#378ADD] to-[#378ADD]/30" />
+                        {step.edgeLabel && (
+                          <span className="text-[9px] text-[#666] italic font-medium mt-1">
+                            {step.edgeLabel}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <div className="relative pt-2">
+                      <div
+                        className={`absolute left-1/2 -translate-x-1/2 -top-2 w-6 h-6 rounded-full flex items-center justify-center font-bold text-[11px] text-white ${
+                          step.terminated ? 'bg-[#f59e0b]' : 'bg-[#378ADD]'
+                        }`}
+                      >
+                        {i + 1}
+                      </div>
+                      <div
+                        className="bg-[#111114] rounded-lg p-2.5 transition-all hover:bg-[#0d0d0f] hover:shadow-lg cursor-pointer"
+                        style={{
+                          border: step.terminated
+                            ? `1px solid #ef9f27`
+                            : `1px solid ${colors.border}40`,
+                        }}
+                        onClick={() => {
+                          const node = nodeById(step.nodeId);
+                          if (node) {
+                            setSelectedId(step.nodeId);
+                            setInspectorOpen(true);
+                            setExpandedStep(i);
+                            setCheckResults((prev) => {
+                              const n = { ...prev };
+                              delete n[i];
+                              return n;
+                            });
+                            setTimeout(() => {
+                              if (step.terminated && errorRef.current) {
+                                errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                              } else {
+                                inspectorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              }
+                            }, 100);
+                          }
+                        }}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <div
+                            className="text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wide"
+                            style={{ background: colors.badgeBg, color: colors.badgeText }}
+                          >
+                            {KIND_LABELS[step.kind] || step.kind}
+                          </div>
+                          <span className="text-[10px] text-[#ddd] font-semibold flex-1 truncate">
+                            {step.name}
+                          </span>
+                        </div>
+                        {step.description && !step.description.includes('CHAIN STOP') && (
+                          <div className="text-[10px] text-[#888] leading-relaxed">
+                            {step.description}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CollapsibleSection>
         )}
       </div>
 

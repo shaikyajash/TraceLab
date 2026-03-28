@@ -385,6 +385,18 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                   }
                 }
               }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                if (!isDragging && !isGreyedOut) {
+                  setSelectedId(node.id);
+                  if (isSidebarCollapsed) {
+                    toggleSidebar();
+                  }
+                  // Trigger node input mode
+                  const event = new CustomEvent('nodeDoubleClick', { detail: { nodeId: node.id } });
+                  window.dispatchEvent(event);
+                }
+              }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
