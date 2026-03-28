@@ -40,6 +40,11 @@ interface SidebarProps {
   isPausedAtBreakpoint?: boolean;
   rerunFromStep: (stepIndex: number, nodeId: string, newInput: unknown) => void;
   resumeSimulation?: () => void;
+  startFromNodeId: string | null;
+  setStartFromNodeId: (id: string | null) => void;
+  startFromNodeInput: string;
+  setStartFromNodeInput: (input: string) => void;
+  startFromNode: () => void;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -309,6 +314,11 @@ export default function Sidebar(props: SidebarProps) {
     isPausedAtBreakpoint,
     rerunFromStep,
     resumeSimulation,
+    startFromNodeId,
+    setStartFromNodeId,
+    startFromNodeInput,
+    setStartFromNodeInput,
+    startFromNode,
   } = props;
 
   const [paramsOpen, setParamsOpen] = useState(true);
@@ -764,6 +774,47 @@ export default function Sidebar(props: SidebarProps) {
           </Button>
         )}
       </div>
+
+      {/* Start From Node Section */}
+      {startFromNodeId && (
+        <div className="border-t-[0.5px] border-[#2a2a2e] p-4 bg-[#0a0a0c]">
+          <div className="mb-3">
+            <div className="text-[10px] text-[#666] tracking-[1.2px] font-semibold mb-2">START FROM NODE</div>
+            <div className="text-[11px] text-[#378ADD] font-semibold bg-[#111114] p-2 rounded border border-[#2a2a2e] mb-3">
+              {nodeById(startFromNodeId)?.name || startFromNodeId}
+            </div>
+          </div>
+
+          <div className="mb-3">
+            <label className="text-[9px] text-[#666] mb-1.5 block tracking-wide font-medium">INPUT PAYLOAD (JSON)</label>
+            <textarea
+              value={startFromNodeInput}
+              onChange={(e) => setStartFromNodeInput(e.target.value)}
+              placeholder='{\n  \n}'
+              spellCheck={false}
+              className="w-full min-h-[100px] bg-[#111114] border-[0.5px] border-[#2a2a2e] rounded-md p-2.5 text-[#ddd] text-[11px] outline-none box-border resize-y leading-relaxed font-mono focus:border-[#378ADD]"
+            />
+          </div>
+
+          <div className="flex gap-2">
+            <Button
+              onClick={() => {
+                startFromNode();
+                setStartFromNodeId(null);
+              }}
+              className="flex-1 bg-[#378ADD] hover:bg-[#4a9bef] text-white text-[11px] font-medium"
+            >
+              Start Simulation
+            </Button>
+            <Button
+              onClick={() => setStartFromNodeId(null)}
+              className="flex-1 bg-transparent border border-[#2a2a2e] hover:border-[#888] text-[#888] hover:text-white text-[11px] font-medium transition-colors"
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Sections Content */}
       <div 

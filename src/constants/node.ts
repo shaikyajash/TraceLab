@@ -19,6 +19,11 @@ export const CORE_KINDS = new Set([
   'external_http_call',
   'function',
   'background_process',
+  'classifier',
+  'decision',
+  'generator',
+  'polling_task',
+  'cli_command',
 ]);
 
 // Node kind colors
@@ -77,6 +82,36 @@ export const KIND_COLORS: Record<string, NodeColors> = {
     badgeBg: '#F0A0C0',
     badgeText: '#72164A',
   },
+  classifier: {
+    bg: '#0e1e1e',
+    border: '#0F8B8D',
+    badgeBg: '#A0E7E5',
+    badgeText: '#0D5F61',
+  },
+  decision: {
+    bg: '#1e0e1e',
+    border: '#9B3060',
+    badgeBg: '#E8B4D8',
+    badgeText: '#6B1F4A',
+  },
+  generator: {
+    bg: '#0e1e0e',
+    border: '#2D5016',
+    badgeBg: '#B8E6A0',
+    badgeText: '#1F3A0A',
+  },
+  polling_task: {
+    bg: '#1a0d0e',
+    border: '#8B3A3A',
+    badgeBg: '#E8B4B4',
+    badgeText: '#5C2626',
+  },
+  cli_command: {
+    bg: '#0e1a1e',
+    border: '#1E5A7A',
+    badgeBg: '#A8D5E8',
+    badgeText: '#0D3A52',
+  },
 };
 
 // Node kind labels
@@ -90,4 +125,9 @@ export const KIND_LABELS: Record<string, string> = {
   external_http_call: 'EXT HTTP',
   function: 'FUNC',
   background_process: 'WORKER',
+  classifier: 'CLASSIFY',
+  decision: 'DECIDE',
+  generator: 'GENERATE',
+  polling_task: 'POLL',
+  cli_command: 'CLI',
 };

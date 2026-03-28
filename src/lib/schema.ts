@@ -1,20 +1,43 @@
-// Output schema for components.json
+// Output schema for components.json - supports both new.json and new2.json
 
 export interface ComponentsGraph {
-  meta: {
+  version?: string;
+  repo?: string;
+  scanned_at: string;
+  workspace_path?: string;
+  entry_points?: EntryPoint[];
+  meta?: {
     scanned_at: string;
     workspace_path: string;
     services_found: string[];
     files_scanned: number;
     model: string;
   };
-  services: ServiceInfo[];
-  nodes: ComponentNode[];
-  edges: PayloadEdge[];
-  mutations: StateMutation[];
-  cross_service_calls: CrossServiceCall[];
-  external_packages: ExternalPackage[];
-  traces?: RouteTrace[];
+  services?: ServiceInfo[];
+  nodes?: ComponentNode[] | Record<string, any>;
+  edges?: PayloadEdge[] | Edge[];
+  mutations?: StateMutation[];
+  cross_service_calls?: CrossServiceCall[];
+  external_packages?: ExternalPackage[];
+  traces?: RouteTrace[] | Record<string, any[]>;
+}
+
+export interface EntryPoint {
+  id: string;
+  kind: string;
+  label: string;
+  fn_name: string;
+  file: string;
+  line: number;
+  input_schema: Record<string, unknown>;
+}
+
+export interface Edge {
+  from: string;
+  to: string;
+  kind: string;
+  condition?: Record<string, unknown>;
+  terminates?: boolean;
 }
 
 /** Condition for matching a trace to a payload or filtering a step */
@@ -120,7 +143,12 @@ export interface ComponentNode {
     | 'enum'
     | 'message_queue'
     | 'function'
-    | 'background_process';
+    | 'background_process'
+    | 'classifier'
+    | 'decision'
+    | 'generator'
+    | 'polling_task'
+    | 'cli_command';
 
   name: string;
   input?: string;

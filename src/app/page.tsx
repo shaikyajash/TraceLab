@@ -11,6 +11,7 @@ import type {
 } from '@/types';
 import { resolveTrace } from '@/lib/trace-resolver';
 import { resolveNodeOutput, adaptInput } from '@/lib/simulation';
+import { convertNew2Graph } from '@/lib/convert-graph';
 import {
   CORE_KINDS,
   NODE_W,
@@ -144,7 +145,11 @@ export default function Home() {
     try {
       const savedGraph = localStorage.getItem(STORAGE_KEYS.GRAPH);
       const savedUrl = localStorage.getItem(STORAGE_KEYS.GITHUB_URL);
-      if (savedGraph) setGraph(JSON.parse(savedGraph));
+      if (savedGraph) {
+        const rawData = JSON.parse(savedGraph);
+        const convertedData = convertNew2Graph(rawData);
+        setGraph(convertedData);
+      }
       if (savedUrl) setGithubUrl(savedUrl);
     } catch (err) {
       console.error('Failed to restore session:', err);
@@ -178,6 +183,10 @@ export default function Home() {
   const [breakpoints, setBreakpoints] = useState<Set<string>>(new Set());
   const [isPausedAtBreakpoint, setIsPausedAtBreakpoint] = useState(false);
   const [currentBreakpointId, setCurrentBreakpointId] = useState<string | null>(null);
+
+  /* start from node feature */
+  const [startFromNodeId, setStartFromNodeId] = useState<string | null>(null);
+  const [startFromNodeInput, setStartFromNodeInput] = useState('{\n  \n}');
 
   // Refs for always-current values inside async callbacks (avoids stale closures)
   const traceStepsRef = useRef<TraceStep[]>([]);
@@ -511,9 +520,10 @@ export default function Home() {
           body: JSON.stringify({ path: outputPath }),
         });
         if (loadRes.ok) {
-          const data: ComponentsGraph = await loadRes.json();
-          setGraph(data);
-          localStorage.setItem(STORAGE_KEYS.GRAPH, JSON.stringify(data));
+          const rawData: ComponentsGraph = await loadRes.json();
+          const convertedData = convertNew2Graph(rawData);
+          setGraph(convertedData);
+          localStorage.setItem(STORAGE_KEYS.GRAPH, JSON.stringify(convertedData));
           localStorage.setItem(STORAGE_KEYS.GITHUB_URL, scanInput);
         } else {
           throw new Error('Scan completed but failed to load graph');
@@ -535,9 +545,11 @@ export default function Home() {
     const reader = new FileReader();
     reader.onload = () => {
       try {
-        const data = JSON.parse(reader.result as string);
-        setGraph(data);
-        localStorage.setItem(STORAGE_KEYS.GRAPH, JSON.stringify(data));
+        const rawData = JSON.parse(reader.result as string);
+        // Convert new2.json format if needed
+        const convertedData = convertNew2Graph(rawData);
+        setGraph(convertedData);
+        localStorage.setItem(STORAGE_KEYS.GRAPH, JSON.stringify(convertedData));
         setError(null);
       } catch {
         setError('Invalid JSON file');
@@ -763,6 +775,131 @@ export default function Home() {
     setIsTracing(false);
     setTimeout(() => setTraceHeadId(null), TRACE_HEAD_CLEAR_DELAY);
   }, [traceRouteId, graph, nodeMap, reqBody, pathParams, breakpoints]);
+
+  /* Start simulation from a specific node with custom input */
+  const startFromNode = useCallback(async () => {
+    if (!startFromNodeId || !graph) return;
+    
+    setIsTracing(true);
+    setTraceSteps([]);
+    setTraceVisible(0);
+    setActiveTraceIds(new Set());
+    setTraceHeadId(null);
+    setIsPausedAtBreakpoint(false);
+    setCurrentBreakpointId(null);
+
+    let payload: unknown = {};
+    try {
+      payload = JSON.parse(startFromNodeInput);
+    } catch {
+      /* empty */
+    }
+
+    // Build a trace starting from this node
+    const startNode = nodeMap.get(startFromNodeId);
+    if (!startNode) return;
+
+    // Find all reachable nodes from this starting point using BFS
+    const reachable = new Set<string>();
+    const queue = [startFromNodeId];
+    reachable.add(startFromNodeId);
+
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      for (const edge of graph.edges) {
+        if (edge.from === current && !reachable.has(edge.to)) {
+          reachable.add(edge.to);
+          queue.push(edge.to);
+        }
+      }
+    }
+
+    // Create trace steps for reachable nodes
+    const steps: TraceStep[] = [];
+    let currentPayload: unknown = payload;
+
+    // Start with the selected node
+    const resolved = resolveNodeOutput(startNode, payload);
+    currentPayload = resolved.output;
+    steps.push({
+      nodeId: startFromNodeId,
+      name: startNode.name,
+      kind: startNode.kind,
+      description: startNode.description || 'Starting node',
+      edgeLabel: '',
+      inputType: startNode.input ?? null,
+      outputType: startNode.output ?? null,
+      inputPayload: payload,
+      outputPayload: resolved.output,
+      terminated: resolved.terminates,
+      terminatedReason: resolved.terminates
+        ? (resolved.explanation ?? 'Execution terminated at this step')
+        : undefined,
+    });
+
+    if (resolved.terminates) {
+      setTraceSteps(steps);
+      traceStepsRef.current = steps;
+      setTraceHeadId(startFromNodeId);
+      setActiveTraceIds(new Set([startFromNodeId]));
+      setTraceVisible(1);
+      setIsTracing(false);
+      return;
+    }
+
+    // Continue to reachable nodes
+    for (const nodeId of reachable) {
+      if (nodeId === startFromNodeId) continue;
+      const node = nodeMap.get(nodeId);
+      if (!node) continue;
+
+      const inputPayload = adaptInput(currentPayload, node, undefined);
+      const nodeResolved = resolveNodeOutput(node, inputPayload);
+      currentPayload = nodeResolved.output;
+
+      steps.push({
+        nodeId,
+        name: node.name,
+        kind: node.kind,
+        description: node.description || '',
+        edgeLabel: '',
+        inputType: node.input ?? null,
+        outputType: node.output ?? null,
+        inputPayload,
+        outputPayload: nodeResolved.output,
+        terminated: nodeResolved.terminates,
+        terminatedReason: nodeResolved.terminates
+          ? (nodeResolved.explanation ?? 'Execution terminated at this step')
+          : undefined,
+      });
+
+      if (nodeResolved.terminates) break;
+    }
+
+    setTraceSteps(steps);
+    traceStepsRef.current = steps;
+
+    // Animate through steps
+    for (let i = 0; i < steps.length; i++) {
+      await new Promise((r) => setTimeout(r, TRACE_STEP_DELAY));
+      setTraceHeadId(steps[i].nodeId);
+      setActiveTraceIds((prev) => new Set([...prev, steps[i].nodeId]));
+      setTraceVisible(i + 1);
+      traceVisibleRef.current = i + 1;
+
+      // Check if current node is a breakpoint
+      if (breakpoints.has(steps[i].nodeId)) {
+        setIsPausedAtBreakpoint(true);
+        setCurrentBreakpointId(steps[i].nodeId);
+        setSelectedId(steps[i].nodeId);
+        setIsTracing(false);
+        return;
+      }
+    }
+
+    setIsTracing(false);
+    setTimeout(() => setTraceHeadId(null), TRACE_HEAD_CLEAR_DELAY);
+  }, [startFromNodeId, startFromNodeInput, graph, nodeMap, breakpoints]);
 
   const resumeSimulation = useCallback(async () => {
     // Read latest state from refs
@@ -1114,6 +1251,11 @@ export default function Home() {
               isPausedAtBreakpoint={isPausedAtBreakpoint}
               rerunFromStep={rerunFromStep}
               resumeSimulation={resumeSimulation}
+              startFromNodeId={startFromNodeId}
+              setStartFromNodeId={setStartFromNodeId}
+              startFromNodeInput={startFromNodeInput}
+              setStartFromNodeInput={setStartFromNodeInput}
+              startFromNode={startFromNode}
             />
           )}
         </div>
@@ -1168,6 +1310,11 @@ export default function Home() {
           setScale={setScale}
           exportGraph={exportGraph}
           onNodeDrag={handleNodeDrag}
+          startFromNodeId={startFromNodeId}
+          setStartFromNodeId={setStartFromNodeId}
+          startFromNodeInput={startFromNodeInput}
+          setStartFromNodeInput={setStartFromNodeInput}
+          startFromNode={startFromNode}
         />
       </div>
     </div>

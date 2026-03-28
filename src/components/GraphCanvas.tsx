@@ -47,6 +47,11 @@ interface GraphCanvasProps {
   setScale: React.Dispatch<React.SetStateAction<number>>;
   exportGraph: () => void;
   onNodeDrag: (nodeId: string, x: number, y: number) => void;
+  startFromNodeId: string | null;
+  setStartFromNodeId: (id: string | null) => void;
+  startFromNodeInput: string;
+  setStartFromNodeInput: (input: string) => void;
+  startFromNode: () => void;
 }
 
 function edgePath(x1: number, y1: number, x2: number, y2: number): string {
@@ -89,6 +94,11 @@ export default function GraphCanvas(props: GraphCanvasProps) {
     setScale,
     exportGraph,
     onNodeDrag,
+    startFromNodeId,
+    setStartFromNodeId,
+    startFromNodeInput,
+    setStartFromNodeInput,
+    startFromNode,
   } = props;
 
   // Node dragging state
@@ -385,6 +395,13 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                   }
                 }
               }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                // Double-click to start simulation from this node
+                if (!isGreyedOut) {
+                  setStartFromNodeId(node.id);
+                }
+              }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
@@ -525,6 +542,50 @@ export default function GraphCanvas(props: GraphCanvasProps) {
                   </div>
                 )}
               </div>
+
+              {/* Function names below node - only show when node is in active trace */}
+              {activeTraceIds.size > 0 && isTraceActive && stepNumbers.length > 0 && (
+                <div
+                  className="absolute left-1/2 -translate-x-1/2 mt-2 flex flex-col items-center gap-1"
+                  style={{
+                    top: NODE_H + 50,
+                    pointerEvents: 'none',
+                  }}
+                >
+                  {/* Get all functions that appear after this node in the trace */}
+                  {(() => {
+                    const nodeFunctions: typeof functionSteps = [];
+                    const nodeStepIndices = traceSteps
+                      .slice(0, traceVisible)
+                      .map((s, i) => (s.nodeId === node.id ? i : -1))
+                      .filter((i) => i !== -1);
+
+                    if (nodeStepIndices.length > 0) {
+                      const lastNodeStepIndex = nodeStepIndices[nodeStepIndices.length - 1];
+                      // Find all function steps that come after this node
+                      for (let i = lastNodeStepIndex + 1; i < traceSteps.slice(0, traceVisible).length; i++) {
+                        const step = traceSteps[i];
+                        // Stop when we hit the next core node
+                        if (coreNodes.some((n) => n.id === step.nodeId)) break;
+                        if (step.kind === 'function') {
+                          nodeFunctions.push(step);
+                        }
+                      }
+                    }
+
+                    return nodeFunctions.length > 0 ? (
+                      <div className="flex items-center gap-1.5 px-2 py-1 bg-[#1a1a1f] border border-[#854F0B] rounded-md">
+                        <span className="text-[9px] text-[#ddd] font-medium">
+                          {nodeFunctions.map((f) => f.name).join(', ')}
+                        </span>
+                        <div className="w-5 h-5 rounded-full bg-[#854F0B] flex items-center justify-center">
+                          <span className="text-[8px] font-bold text-white">{nodeFunctions.length}</span>
+                        </div>
+                      </div>
+                    ) : null;
+                  })()}
+                </div>
+              )}
             </div>
           );
         })}
