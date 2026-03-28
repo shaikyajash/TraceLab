@@ -764,6 +764,105 @@ export default function Home() {
     setTimeout(() => setTraceHeadId(null), TRACE_HEAD_CLEAR_DELAY);
   }, [traceRouteId, graph, nodeMap, reqBody, pathParams, breakpoints]);
 
+  /* Run simulation from a specific node (independent of route selection) */
+  const runSimulationFromNode = useCallback(
+    async (nodeId: string, inputPayload: unknown) => {
+      if (!graph) return;
+      setIsTracing(true);
+      setTraceSteps([]);
+      setTraceVisible(0);
+      setActiveTraceIds(new Set());
+      setTraceHeadId(null);
+      setIsPausedAtBreakpoint(false);
+      setCurrentBreakpointId(null);
+
+      const node = nodeMap.get(nodeId);
+      if (!node) {
+        setIsTracing(false);
+        return;
+      }
+
+      // Start with the given node and follow the graph forward
+      let currentPayload: unknown = inputPayload;
+      const steps: TraceStep[] = [];
+      const visited = new Set<string>();
+
+      // Helper to find outgoing edges from a node
+      const getOutgoingEdges = (fromId: string) => {
+        return coreEdges.filter((e) => e.from === fromId);
+      };
+
+      // BFS-like traversal following edges
+      const queue: string[] = [nodeId];
+      visited.add(nodeId);
+
+      while (queue.length > 0) {
+        const currentNodeId = queue.shift();
+        if (!currentNodeId) break;
+
+        const currentNode = nodeMap.get(currentNodeId);
+        if (!currentNode) continue;
+
+        // Adapt input to this node's expected shape
+        const adapted = adaptInput(currentPayload, currentNode);
+        const resolved = resolveNodeOutput(currentNode, adapted);
+
+        steps.push({
+          nodeId: currentNodeId,
+          name: currentNode.name,
+          kind: currentNode.kind,
+          description: currentNode.description || '',
+          edgeLabel: '',
+          inputType: currentNode.input ?? null,
+          outputType: currentNode.output ?? null,
+          inputPayload: adapted,
+          outputPayload: resolved.output,
+          terminated: resolved.terminates,
+          terminatedReason: resolved.terminates
+            ? (resolved.explanation ?? 'Execution terminated at this step')
+            : undefined,
+        });
+
+        if (resolved.terminates) break;
+
+        // Follow outgoing edges
+        const outgoing = getOutgoingEdges(currentNodeId);
+        for (const edge of outgoing) {
+          if (!visited.has(edge.to)) {
+            visited.add(edge.to);
+            queue.push(edge.to);
+          }
+        }
+
+        currentPayload = resolved.output;
+      }
+
+      setTraceSteps(steps);
+      traceStepsRef.current = steps;
+
+      // Animate through steps
+      for (let i = 0; i < steps.length; i++) {
+        await new Promise((r) => setTimeout(r, TRACE_STEP_DELAY));
+        setTraceHeadId(steps[i].nodeId);
+        setActiveTraceIds((prev) => new Set([...prev, steps[i].nodeId]));
+        setTraceVisible(i + 1);
+        traceVisibleRef.current = i + 1;
+
+        if (breakpointsRef.current.has(steps[i].nodeId)) {
+          setIsPausedAtBreakpoint(true);
+          setCurrentBreakpointId(steps[i].nodeId);
+          setSelectedId(steps[i].nodeId);
+          setIsTracing(false);
+          return;
+        }
+      }
+
+      setIsTracing(false);
+      setTimeout(() => setTraceHeadId(null), TRACE_HEAD_CLEAR_DELAY);
+    },
+    [graph, nodeMap, coreEdges, breakpointsRef],
+  );
+
   const resumeSimulation = useCallback(async () => {
     // Read latest state from refs
     const steps = traceStepsRef.current;
@@ -1101,6 +1200,7 @@ export default function Home() {
               reqBody={reqBody}
               setReqBody={setReqBody}
               runSimulation={runSimulation}
+              runSimulationFromNode={runSimulationFromNode}
               isTracing={isTracing}
               traceSteps={traceSteps}
               traceVisible={traceVisible}
