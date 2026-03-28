@@ -7,7 +7,7 @@ WORKDIR /app
 
 COPY package.json bun.lock* package-lock.json* yarn.lock* pnpm-lock.yaml* ./
 RUN \
-  if [ -f bun.lock ]; then corepack enable && corepack prepare bun@latest --activate && bun install --frozen-lockfile; \
+  if [ -f bun.lock ]; then npm install -g bun && bun install --frozen-lockfile; \
   elif [ -f yarn.lock ]; then corepack enable && yarn --frozen-lockfile; \
   elif [ -f package-lock.json ]; then npm ci; \
   elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm i --frozen-lockfile; \
@@ -25,7 +25,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production
 
 RUN \
-  if [ -f bun.lock ]; then corepack enable && corepack prepare bun@latest --activate && bun run build; \
+  if [ -f bun.lock ]; then npm install -g bun && bun run build; \
   elif [ -f yarn.lock ]; then corepack enable && yarn build; \
   elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm build; \
   else npm run build; \
@@ -42,7 +42,9 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
 # Install git for clone-and-scan functionality
-RUN apk add --no-cache git
+COPY --from=deps /usr/bin/git /usr/bin/git
+COPY --from=deps /usr/lib/libpcre2-8.so.0 /usr/lib/
+COPY --from=deps /usr/lib/libz.so.1 /usr/lib/
 
 COPY --from=builder /app/public ./public
 
