@@ -228,36 +228,149 @@ function mergeInputIntoOutput(template: unknown, input: unknown): unknown {
   const tpl = tryParseJson(template);
   const inp = tryParseJson(input);
 
-  if (
-    typeof tpl !== 'object' ||
-    tpl === null ||
-    typeof inp !== 'object' ||
-    inp === null ||
-    Array.isArray(tpl) ||
-    Array.isArray(inp)
-  ) {
+  // If input is not an object, return template
+  if (typeof inp !== 'object' || inp === null) {
     return tpl;
   }
+
+  // If template is not an object, return input (user's data takes precedence)
+  if (typeof tpl !== 'object' || tpl === null) {
+    return inp;
+  }
+
+  // Handle arrays: prefer input array if both are arrays
+  if (Array.isArray(tpl) && Array.isArray(inp)) {
+    return inp;
+  }
+
+  // If only one is array, return input if it's the array (user data), otherwise template
+  if (Array.isArray(inp)) {
+    return inp;
+  }
+  if (Array.isArray(tpl)) {
+    return tpl;
+  }
+
   const tplObj = tpl as Record<string, unknown>;
   const inpObj = inp as Record<string, unknown>;
-  const result: Record<string, unknown> = { ...tplObj };
+  
+  // Start with input as base (user's data is primary)
+  const result: Record<string, unknown> = { ...inpObj };
 
+  // Add template fields that aren't in input (computed fields like order_evaluations)
   for (const key of Object.keys(tplObj)) {
-    if (!(key in inpObj)) continue;
-    const tVal = tryParseJson(tplObj[key]);
-    const iVal = tryParseJson(inpObj[key]);
+    if (key in inpObj) {
+      // Field exists in both - merge recursively
+      const tVal = tryParseJson(tplObj[key]);
+      const iVal = tryParseJson(inpObj[key]);
 
-    if (
-      typeof tVal === 'object' &&
-      tVal !== null &&
-      !Array.isArray(tVal) &&
-      typeof iVal === 'object' &&
-      iVal !== null &&
-      !Array.isArray(iVal)
-    ) {
-      result[key] = mergeInputIntoOutput(tVal, iVal);
-    } else if (!Array.isArray(tVal)) {
-      result[key] = iVal;
+      // If both are arrays, use input array directly
+      if (Array.isArray(tVal) && Array.isArray(iVal)) {
+        result[key] = iVal;
+      } else if (
+        typeof tVal === 'object' &&
+        tVal !== null &&
+        !Array.isArray(tVal) &&
+        typeof iVal === 'object' &&
+        iVal !== null &&
+        !Array.isArray(iVal)
+      ) {
+        // Both are objects (not arrays), merge recursively
+        result[key] = mergeInputIntoOutput(tVal, iVal);
+      } else {
+        // Primitive or mismatched types, use input value
+        result[key] = iVal;
+      }
+    } else {
+      // Field only in template - compute it based on input if possible
+      if (key === 'cleanup_summary' && 'orders' in result && Array.isArray(result.orders)) {
+        // Compute cleanup_summary from input orders
+        const orders = result.orders as any[];
+        result[key] = {
+          current_order_ids: orders.map((o: any) => o.create_order?.create_id).filter(Boolean),
+          removed_invalid_order_ids: [],
+          removed_non_init_order_ids: [],
+          removed_non_redeemed_order_ids: [],
+          removed_managed_secret_order_ids: [],
+          removed_improper_fill_order_ids: [],
+          removed_hard_fail_order_ids: []
+        };
+      } else if (key === 'order_evaluations' && 'orders' in result && Array.isArray(result.orders)) {
+        // Compute order_evaluations from input orders
+        const orders = result.orders as any[];
+        // Filter out blacklisted orders (they are skipped in the actual Rust code)
+        const blacklistedOrders = orders.filter((order: any) => {
+          const isBlacklisted = order.create_order?.additional_data?.is_blacklisted;
+          return isBlacklisted;
+        });
+        const processedOrders = orders.filter((order: any) => {
+          const isBlacklisted = order.create_order?.additional_data?.is_blacklisted;
+          return !isBlacklisted;
+        });
+        
+        // Add skipped orders summary
+        if (blacklistedOrders.length > 0) {
+          result['skipped_orders'] = {
+            count: blacklistedOrders.length,
+            reason: 'blacklisted',
+            order_ids: blacklistedOrders.map((o: any) => o.create_order?.create_id).filter(Boolean)
+          };
+        }
+        
+        result[key] = processedOrders.map((order: any) => {
+          // Simple state determination based on swap status
+          let orderState = 'New';
+          const srcSwap = order.source_swap || {};
+          const dstSwap = order.destination_swap || {};
+          
+          // Check for hard fail: source refunded after destination initiated
+          if (srcSwap.refund_tx_hash && dstSwap.initiate_tx_hash && !dstSwap.redeem_tx_hash && !dstSwap.refund_tx_hash) {
+            orderState = 'HardFail';
+          }
+          // Check redemption states (only if swaps were initiated)
+          else if (srcSwap.redeem_tx_hash && srcSwap.initiate_tx_hash) {
+            orderState = 'CobiRedeemed';
+          } else if (dstSwap.redeem_tx_hash && dstSwap.initiate_tx_hash) {
+            orderState = 'UserRedeemed';
+          } else if (dstSwap.initiate_tx_hash && !dstSwap.redeem_tx_hash) {
+            orderState = 'CobiInitiated';
+          } else if (srcSwap.initiate_tx_hash && !srcSwap.redeem_tx_hash) {
+            orderState = 'UserInitiated';
+          }
+          // Check for improper fill (only if swaps have been initiated)
+          else if ((srcSwap.initiate_tx_hash || dstSwap.initiate_tx_hash) && 
+                   (srcSwap.filled_amount !== srcSwap.amount || dstSwap.filled_amount !== dstSwap.amount)) {
+            orderState = 'ImproperFill';
+          }
+          
+          // Validate pending orders (New state)
+          let isValidPendingOrder = null;
+          if (orderState === 'New') {
+            // Invalid if has redeem tx when nothing is initiated
+            isValidPendingOrder = !(srcSwap.redeem_tx_hash && !srcSwap.initiate_tx_hash);
+          }
+          
+          return {
+            order: order,
+            order_state: orderState,
+            is_valid_pending_order: isValidPendingOrder
+          };
+        });
+      } else if (key === 'cache_updates' && 'order_evaluations' in result && Array.isArray(result.order_evaluations)) {
+        // Compute cache_updates from order_evaluations
+        const evals = result.order_evaluations as any[];
+        result[key] = {
+          hard_fail_order_ids: evals.filter((e: any) => e.order_state === 'HardFail').map((e: any) => e.order?.create_order?.create_id).filter(Boolean),
+          invalid_order_ids: evals.filter((e: any) => e.order_state === 'New' && e.is_valid_pending_order === false).map((e: any) => e.order?.create_order?.create_id).filter(Boolean),
+          non_init_order_ids: evals.filter((e: any) => e.order_state === 'UserInitiated').map((e: any) => e.order?.create_order?.create_id).filter(Boolean),
+          non_redeemed_order_ids: evals.filter((e: any) => e.order_state === 'UserRedeemed').map((e: any) => e.order?.create_order?.create_id).filter(Boolean),
+          managed_secret_order_ids: evals.filter((e: any) => e.order_state === 'CobiInitiated').map((e: any) => e.order?.create_order?.create_id).filter(Boolean),
+          improper_fill_order_ids: evals.filter((e: any) => e.order_state === 'ImproperFill').map((e: any) => e.order?.create_order?.create_id).filter(Boolean)
+        };
+      } else {
+        // Other computed fields - use template value
+        result[key] = tplObj[key];
+      }
     }
   }
 
@@ -470,6 +583,13 @@ export function resolveNodeOutput(node: ComponentNode, inputPayload: unknown): R
     if (bestCase && bestScore > 0) {
       const output = mergeInputIntoOutput(bestCase.output, inputPayload);
       return { output, terminates: !!bestCase.terminates, explanation: bestCase.explanation };
+    }
+
+    // Check if there's a catch-all case (no match conditions or empty match array)
+    const catchAll = node.output_cases.find((c) => !c.match || c.match.length === 0);
+    if (catchAll) {
+      const output = mergeInputIntoOutput(catchAll.output, inputPayload);
+      return { output, terminates: !!catchAll.terminates, explanation: catchAll.explanation };
     }
 
     // No output_case matched — produce a diagnostic showing WHY
