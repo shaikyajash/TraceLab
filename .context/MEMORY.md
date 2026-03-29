@@ -1,4 +1,3 @@
 - [Architecture](project_architecture.md) — 3-phase pipeline, simulation engine, known static output limitation
 - [Simulation Rules](feedback_simulation_rules.md) — Chain awareness, struct parity, array merging, when conditions, non-server support
-- [Next Steps](project_next_steps.md) — Static compute limitation, local path scanning, trace redesign
 - [OpenAI Provider](reference_openai.md) — Uses OpenAI GPT-5.4 exclusively, not Claude or Gemini

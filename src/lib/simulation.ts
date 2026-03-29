@@ -224,7 +224,7 @@ function mergeInputIntoOutput(template: unknown, input: unknown): unknown {
 
   const tplObj = tpl as Record<string, unknown>;
   const inpObj = inp as Record<string, unknown>;
-  
+
   // Start with input as base (user's data is primary)
   const result: Record<string, unknown> = { ...inpObj };
 
@@ -253,95 +253,8 @@ function mergeInputIntoOutput(template: unknown, input: unknown): unknown {
         result[key] = iVal;
       }
     } else {
-      // Field only in template - compute it based on input if possible
-      if (key === 'cleanup_summary' && 'orders' in result && Array.isArray(result.orders)) {
-        // Compute cleanup_summary from input orders
-        const orders = result.orders as any[];
-        result[key] = {
-          current_order_ids: orders.map((o: any) => o.create_order?.create_id).filter(Boolean),
-          removed_invalid_order_ids: [],
-          removed_non_init_order_ids: [],
-          removed_non_redeemed_order_ids: [],
-          removed_managed_secret_order_ids: [],
-          removed_improper_fill_order_ids: [],
-          removed_hard_fail_order_ids: []
-        };
-      } else if (key === 'order_evaluations' && 'orders' in result && Array.isArray(result.orders)) {
-        // Compute order_evaluations from input orders
-        const orders = result.orders as any[];
-        // Filter out blacklisted orders (they are skipped in the actual Rust code)
-        const blacklistedOrders = orders.filter((order: any) => {
-          const isBlacklisted = order.create_order?.additional_data?.is_blacklisted;
-          return isBlacklisted;
-        });
-        const processedOrders = orders.filter((order: any) => {
-          const isBlacklisted = order.create_order?.additional_data?.is_blacklisted;
-          return !isBlacklisted;
-        });
-        
-        // Add skipped orders summary
-        if (blacklistedOrders.length > 0) {
-          result['skipped_orders'] = {
-            count: blacklistedOrders.length,
-            reason: 'blacklisted',
-            order_ids: blacklistedOrders.map((o: any) => o.create_order?.create_id).filter(Boolean)
-          };
-        }
-        
-        result[key] = processedOrders.map((order: any) => {
-          // Simple state determination based on swap status
-          let orderState = 'New';
-          const srcSwap = order.source_swap || {};
-          const dstSwap = order.destination_swap || {};
-          
-          // Check for hard fail: source refunded after destination initiated
-          if (srcSwap.refund_tx_hash && dstSwap.initiate_tx_hash && !dstSwap.redeem_tx_hash && !dstSwap.refund_tx_hash) {
-            orderState = 'HardFail';
-          }
-          // Check redemption states (only if swaps were initiated)
-          else if (srcSwap.redeem_tx_hash && srcSwap.initiate_tx_hash) {
-            orderState = 'CobiRedeemed';
-          } else if (dstSwap.redeem_tx_hash && dstSwap.initiate_tx_hash) {
-            orderState = 'UserRedeemed';
-          } else if (dstSwap.initiate_tx_hash && !dstSwap.redeem_tx_hash) {
-            orderState = 'CobiInitiated';
-          } else if (srcSwap.initiate_tx_hash && !srcSwap.redeem_tx_hash) {
-            orderState = 'UserInitiated';
-          }
-          // Check for improper fill (only if swaps have been initiated)
-          else if ((srcSwap.initiate_tx_hash || dstSwap.initiate_tx_hash) && 
-                   (srcSwap.filled_amount !== srcSwap.amount || dstSwap.filled_amount !== dstSwap.amount)) {
-            orderState = 'ImproperFill';
-          }
-          
-          // Validate pending orders (New state)
-          let isValidPendingOrder = null;
-          if (orderState === 'New') {
-            // Invalid if has redeem tx when nothing is initiated
-            isValidPendingOrder = !(srcSwap.redeem_tx_hash && !srcSwap.initiate_tx_hash);
-          }
-          
-          return {
-            order: order,
-            order_state: orderState,
-            is_valid_pending_order: isValidPendingOrder
-          };
-        });
-      } else if (key === 'cache_updates' && 'order_evaluations' in result && Array.isArray(result.order_evaluations)) {
-        // Compute cache_updates from order_evaluations
-        const evals = result.order_evaluations as any[];
-        result[key] = {
-          hard_fail_order_ids: evals.filter((e: any) => e.order_state === 'HardFail').map((e: any) => e.order?.create_order?.create_id).filter(Boolean),
-          invalid_order_ids: evals.filter((e: any) => e.order_state === 'New' && e.is_valid_pending_order === false).map((e: any) => e.order?.create_order?.create_id).filter(Boolean),
-          non_init_order_ids: evals.filter((e: any) => e.order_state === 'UserInitiated').map((e: any) => e.order?.create_order?.create_id).filter(Boolean),
-          non_redeemed_order_ids: evals.filter((e: any) => e.order_state === 'UserRedeemed').map((e: any) => e.order?.create_order?.create_id).filter(Boolean),
-          managed_secret_order_ids: evals.filter((e: any) => e.order_state === 'CobiInitiated').map((e: any) => e.order?.create_order?.create_id).filter(Boolean),
-          improper_fill_order_ids: evals.filter((e: any) => e.order_state === 'ImproperFill').map((e: any) => e.order?.create_order?.create_id).filter(Boolean)
-        };
-      } else {
-        // Other computed fields - use template value
-        result[key] = tplObj[key];
-      }
+      // Other computed fields - use template value
+      result[key] = tplObj[key];
     }
   }
 
@@ -503,7 +416,7 @@ export function resolveNodeOutput(node: ComponentNode, inputPayload: unknown): R
     try {
       const output = executeCompute(node.compute, inputPayload);
       // Check if output indicates termination (error case)
-      const terminates = 
+      const terminates =
         (typeof output === 'object' && output !== null && 'err' in output) ||
         (typeof output === 'object' && output !== null && 'ok' in output && output.ok === false);
       return {

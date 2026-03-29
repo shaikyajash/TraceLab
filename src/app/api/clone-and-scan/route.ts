@@ -137,19 +137,16 @@ export async function POST(request: NextRequest) {
         clonePath = path.join(os.tmpdir(), 'tracelab-' + slug);
 
         /* remove any leftover from a previous run */
-        await fs.rm(clonePath, { recursive: true, force: true }).catch(() => { });
-        
+        await fs.rm(clonePath, { recursive: true, force: true }).catch(() => {});
+
         // Sanitize URL for display (remove credentials)
         const displayUrl = sanitize(trimmed);
         send({ phase: 'discovering', message: `Cloning ${displayUrl}...` });
-        
+
         const gitUrl = normalizeGitUrl(trimmed);
 
         // inject credentials into URL
-        const authUrl = gitUrl.replace(
-          'https://',
-          'https://lohit-dev:mangarock@'
-        );
+        const authUrl = gitUrl.replace('https://', 'https://lohit-dev:mangarock@');
 
         execSync(`git clone --depth 1 ${authUrl} ${clonePath}`, {
           timeout: 120000,
@@ -250,7 +247,7 @@ export async function POST(request: NextRequest) {
         /* clean up cloned repo — we have the JSON now */
         if (clonePath) {
           send({ phase: 'merging', message: 'Cleaning up cloned repo...' });
-          await fs.rm(clonePath, { recursive: true, force: true }).catch(() => { });
+          await fs.rm(clonePath, { recursive: true, force: true }).catch(() => {});
         }
 
         send({
@@ -271,7 +268,7 @@ export async function POST(request: NextRequest) {
         send({ phase: 'error', message });
         /* clean up on error too */
         if (clonePath) {
-          await fs.rm(clonePath, { recursive: true, force: true }).catch(() => { });
+          await fs.rm(clonePath, { recursive: true, force: true }).catch(() => {});
         }
       } finally {
         close();
